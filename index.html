@@ -1,0 +1,1262 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="画像を外部へ送信せず、ブラウザだけで結合・分割・切り抜き・リサイズ・自由配置・フィルターによる画像加工ができるツールです。">
+  <title>画像かんたん加工</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#mainContent">メインコンテンツへ移動</a>
+
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">◇</span>
+        <div>
+          <h1>画像かんたん加工</h1>
+          <p>結合・分割・切り抜き・自由配置・フィルターをブラウザだけで</p>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <nav class="mode-switch" aria-label="加工モード">
+          <button
+            id="modeCombineBtn"
+            title="複数画像を縦・横・格子状に並べて1枚にまとめる"
+            class="mode-button is-active"
+            type="button"
+            aria-pressed="true"
+            aria-controls="combineSettings combinePreviewCanvas"
+          >画像結合</button>
+          <button
+            id="modeSplitBtn"
+            class="mode-button has-tooltip"
+            type="button"
+            aria-pressed="false"
+            aria-controls="standardAssetPanel splitSettings splitPreviewCanvas"
+            aria-describedby="modeSplitTooltip"
+          >画像分割<span id="modeSplitTooltip" class="ui-tooltip" role="tooltip">選択した画像を行・列で分割します</span></button>
+          <button
+            id="modeEditBtn"
+            title="切り抜き・サイズ変更・回転で画像の形を整える"
+            class="mode-button"
+            type="button"
+            aria-pressed="false"
+            aria-controls="editSettings editViewport"
+          >画像編集</button>
+          <button
+            id="modeCanvasBtn"
+            title="レイヤーを自由に配置して画像を重ね合わせる"
+            class="mode-button"
+            type="button"
+            aria-pressed="false"
+            aria-controls="canvasLayerPanel canvasViewport canvasSettings"
+          >画像合成</button>
+          <button
+            id="modeFilterBtn"
+            title="色・質感を調整し、仕上げ素材を重ねる"
+            class="mode-button"
+            type="button"
+            aria-pressed="false"
+            aria-controls="standardAssetPanel filterSettings filterPreviewCanvas"
+          >画像加工</button>
+        </nav>
+
+        <nav class="utility-menu-bar" aria-label="ヘルプと設定">
+          <button
+            id="updatesMenuButton"
+            class="utility-action has-tooltip"
+            type="button"
+            aria-haspopup="dialog"
+            aria-controls="updatesDialog"
+            aria-expanded="false"
+            aria-describedby="updatesMenuTooltip"
+          >
+            <svg class="utility-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 13.5V9.8l11-4.3v12.3L4 13.5Zm0 0-1.5.1V9.7L4 9.8m3.2 4.9.9 4.1c.2.8 1 1.3 1.8 1.1l1.3-.3-1-4" />
+            </svg>
+            <span>更新情報</span>
+            <span id="updatesMenuTooltip" class="ui-tooltip" role="tooltip">最近追加・変更された機能を確認します</span>
+          </button>
+
+          <button
+            id="helpMenuButton"
+            class="utility-action has-tooltip"
+            type="button"
+            aria-haspopup="dialog"
+            aria-controls="helpDialog"
+            aria-expanded="false"
+            aria-describedby="helpMenuTooltip"
+          >
+            <svg class="utility-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M9.7 9a2.4 2.4 0 0 1 4.6 1c0 1.8-2.3 2-2.3 3.7M12 17.3h.01" />
+            </svg>
+            <span>ヘルプ</span>
+            <span id="helpMenuTooltip" class="ui-tooltip" role="tooltip">基本操作とショートカットを確認します</span>
+          </button>
+
+          <button
+            id="settingsMenuButton"
+            class="utility-action has-tooltip"
+            type="button"
+            aria-haspopup="dialog"
+            aria-controls="processingPresetDialog"
+            aria-expanded="false"
+            aria-describedby="settingsMenuTooltip"
+          >
+            <svg class="utility-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 4.5h11l3 3v12H5v-15Z" />
+              <path d="M8 4.5V10h7V4.5M8 19.5v-6h8v6" />
+            </svg>
+            <span>設定保存</span>
+            <span id="settingsMenuTooltip" class="ui-tooltip" role="tooltip">加工設定を保存・呼び出し・削除します</span>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main id="mainContent" class="workspace">
+      <aside class="panel image-panel" aria-label="画像素材とレイヤー">
+        <div id="standardAssetPanel" class="panel-mode-content">
+          <div class="panel-heading image-panel-heading">
+            <div>
+              <p class="eyebrow">素材</p>
+              <h2 id="imageListHeading">画像一覧</h2>
+            </div>
+            <span id="imageCount" class="count-badge" aria-live="polite">0枚</span>
+          </div>
+
+          <input
+            id="fileInput"
+            class="visually-hidden"
+            type="file"
+            accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+            multiple
+            aria-label="加工する画像を選択"
+          >
+          <button id="addImagesBtn" class="button button-secondary button-full" type="button">
+            <span aria-hidden="true">＋</span> 画像を追加
+          </button>
+
+          <div id="imageBulkActions" class="image-bulk-actions is-hidden" role="group" aria-label="画像一覧の一括操作" hidden>
+            <label class="image-select-all" for="imageSelectAll">
+              <input id="imageSelectAll" type="checkbox" aria-controls="imageList" aria-describedby="imageSelectionCount">
+              <span>すべて選択</span>
+            </label>
+            <output id="imageSelectionCount" for="imageSelectAll" aria-live="polite">0枚選択</output>
+            <button id="deleteSelectedImagesBtn" class="button button-danger-quiet" type="button" title="チェックを付けた素材だけを一覧から削除します。元ファイルは削除しません" disabled>選択した素材を削除</button>
+            <p id="batchSourceHint" class="batch-source-hint" hidden></p>
+            <button id="applyMarkedCropBtn" class="button button-secondary" type="button" disabled hidden>0枚に切り抜きを適用</button>
+            <button id="applyMarkedResizeBtn" class="button button-secondary" type="button" disabled hidden>0枚にサイズを適用</button>
+            <button id="applyMarkedFilterBtn" class="button button-secondary" type="button" disabled hidden>0枚に加工＋仕上げを適用</button>
+            <button id="exportMarkedBtn" class="button button-primary" type="button" disabled hidden>チェックした0枚を保存</button>
+          </div>
+
+          <p class="list-help">ドラッグして画像の順番を変更できます</p>
+          <div id="imageList" class="image-list" role="list" aria-label="読み込んだ画像。ドラッグで並び替えできます"></div>
+
+          <div class="empty-list-note">
+            <span aria-hidden="true">▧</span>
+            <p>追加した画像がここに並びます</p>
+          </div>
+        </div>
+
+        <section id="canvasLayerPanel" class="panel-mode-content canvas-layer-panel is-hidden" aria-labelledby="canvasLayerHeading" hidden>
+          <div class="panel-heading image-panel-heading">
+            <div>
+              <p class="eyebrow">重なり順</p>
+              <h2 id="canvasLayerHeading">レイヤー</h2>
+            </div>
+            <span id="canvasLayerCount" class="count-badge" aria-live="polite">0枚</span>
+          </div>
+
+          <input
+            id="canvasFileInput"
+            class="visually-hidden"
+            type="file"
+            accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+            multiple
+            aria-label="キャンバスへ配置する画像を選択"
+          >
+          <button id="canvasAddBtn" class="button button-secondary button-full" type="button">
+            <span aria-hidden="true">＋</span> レイヤーを追加
+          </button>
+
+          <p class="list-help">上ほど手前に表示されます。ドラッグまたはAlt＋↑↓で並び替えできます</p>
+          <div id="canvasLayerList" class="canvas-layer-list" role="list" aria-label="キャンバスレイヤー一覧"></div>
+
+          <div id="canvasLayerEmpty" class="empty-list-note canvas-layer-empty">
+            <span aria-hidden="true">▱</span>
+            <p>画像を追加するとレイヤーとして並びます</p>
+          </div>
+        </section>
+      </aside>
+
+      <section class="panel preview-panel" aria-labelledby="previewHeading">
+        <div class="panel-heading preview-heading">
+          <div>
+            <p class="eyebrow">キャンバス</p>
+            <h2 id="previewHeading">プレビュー</h2>
+          </div>
+          <div class="preview-meta">
+            <span id="previewDimensions" class="preview-dimensions" aria-live="polite">—</span>
+            <span class="preview-hint">表示のみ縮小・元解像度で保存</span>
+          </div>
+        </div>
+
+        <div class="preview-stage">
+          <div id="previewPlaceholder" class="preview-placeholder">
+            <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="画像をここにドロップ、またはクリックして画像を選択">
+              <div class="drop-zone-icon" aria-hidden="true">
+                <span></span>
+                <span></span>
+              </div>
+              <h3>画像をここにドロップ</h3>
+              <p>PNG・JPEG・WebP（複数選択できます）</p>
+              <span class="button button-primary drop-zone-button" aria-hidden="true">画像を選択</span>
+            </div>
+          </div>
+
+          <canvas
+            id="combinePreviewCanvas"
+            class="preview-canvas is-hidden"
+            aria-label="結合結果のプレビュー"
+          ></canvas>
+
+          <canvas
+            id="splitPreviewCanvas"
+            class="preview-canvas split-preview-canvas is-hidden"
+            aria-label="選択中画像の分割位置プレビュー"
+            aria-describedby="splitSummary"
+            hidden
+          ></canvas>
+
+          <div id="editViewport" class="edit-viewport is-hidden" aria-label="画像編集プレビュー">
+            <canvas id="editCanvas" aria-label="選択中画像の編集プレビュー"></canvas>
+            <div id="cropOverlay" class="crop-overlay" role="group" tabindex="0" aria-label="切り抜き範囲。ドラッグで移動、ハンドルで大きさを変更できます">
+              <span class="crop-label" aria-hidden="true">切り抜き範囲</span>
+              <div id="cropHandles" aria-hidden="true">
+                <span class="crop-handle handle-n" data-handle="n"></span>
+                <span class="crop-handle handle-s" data-handle="s"></span>
+                <span class="crop-handle handle-e" data-handle="e"></span>
+                <span class="crop-handle handle-w" data-handle="w"></span>
+                <span class="crop-handle handle-ne" data-handle="ne"></span>
+                <span class="crop-handle handle-nw" data-handle="nw"></span>
+                <span class="crop-handle handle-se" data-handle="se"></span>
+                <span class="crop-handle handle-sw" data-handle="sw"></span>
+              </div>
+            </div>
+          </div>
+
+          <canvas
+            id="filterPreviewCanvas"
+            class="preview-canvas filter-preview-canvas is-hidden"
+            aria-label="選択中画像のフィルターと仕上げの完成プレビュー"
+            hidden
+          ></canvas>
+
+          <div
+            id="filterFinishSelectionBox"
+            class="filter-finish-selection-box is-hidden"
+            role="group"
+            tabindex="0"
+            aria-label="選択中の仕上げレイヤー。ドラッグで移動、四隅で拡大縮小、上の丸で回転できます"
+            hidden
+          >
+            <span class="filter-finish-selection-label" aria-hidden="true">仕上げ素材</span>
+            <span class="filter-finish-selection-handle filter-finish-handle-nw" data-finish-handle="nw" aria-hidden="true"></span>
+            <span class="filter-finish-selection-handle filter-finish-handle-ne" data-finish-handle="ne" aria-hidden="true"></span>
+            <span class="filter-finish-selection-handle filter-finish-handle-sw" data-finish-handle="sw" aria-hidden="true"></span>
+            <span class="filter-finish-selection-handle filter-finish-handle-se" data-finish-handle="se" aria-hidden="true"></span>
+            <span class="filter-finish-rotation-stem" aria-hidden="true"></span>
+            <span class="filter-finish-rotation-handle" data-finish-handle="rotate" aria-hidden="true"></span>
+          </div>
+
+          <div id="canvasViewport" class="canvas-viewport is-hidden" aria-label="画像合成プレビュー" hidden>
+            <div class="canvas-toolbar" role="group" aria-label="キャンバス表示倍率">
+              <button id="canvasZoomOutBtn" class="canvas-tool-button" type="button" aria-label="縮小">−</button>
+              <output id="canvasZoomValue" class="canvas-zoom-value" aria-live="polite">100%</output>
+              <button id="canvasZoomInBtn" class="canvas-tool-button" type="button" aria-label="拡大">＋</button>
+              <button id="canvasZoomResetBtn" class="canvas-tool-button canvas-tool-button-wide" type="button">全体表示</button>
+            </div>
+
+            <div class="canvas-scroll-area">
+              <div id="canvasWorkspace" class="canvas-workspace" tabindex="0" aria-label="自由配置キャンバス。選択したレイヤーはドラッグで移動できます">
+                <canvas id="canvasDisplayCanvas" aria-label="画像合成結果"></canvas>
+                <div id="canvasGridOverlay" class="canvas-grid-overlay" aria-hidden="true"></div>
+                <div id="canvasGuideX" class="canvas-guide canvas-guide-x is-hidden" aria-hidden="true"></div>
+                <div id="canvasGuideY" class="canvas-guide canvas-guide-y is-hidden" aria-hidden="true"></div>
+
+                <div id="canvasDropHint" class="canvas-drop-hint" aria-hidden="true">
+                  <span aria-hidden="true">＋</span>
+                  <strong>ここへドロップして配置</strong>
+                </div>
+
+                <div id="canvasSelectionBox" class="canvas-selection-box is-hidden" tabindex="0" role="group" aria-label="選択レイヤーの変形枠。ドラッグで移動、四隅で拡大縮小できます">
+                  <span class="canvas-selection-label" aria-hidden="true">選択中</span>
+                  <span class="canvas-selection-handle canvas-handle-nw" data-handle="nw" data-canvas-handle="nw" aria-hidden="true"></span>
+                  <span class="canvas-selection-handle canvas-handle-ne" data-handle="ne" data-canvas-handle="ne" aria-hidden="true"></span>
+                  <span class="canvas-selection-handle canvas-handle-sw" data-handle="sw" data-canvas-handle="sw" aria-hidden="true"></span>
+                  <span class="canvas-selection-handle canvas-handle-se" data-handle="se" data-canvas-handle="se" aria-hidden="true"></span>
+                  <span class="canvas-rotation-stem" aria-hidden="true"></span>
+                  <span class="canvas-rotation-handle" data-handle="rotate" data-canvas-handle="rotate" aria-hidden="true"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel settings-panel" aria-labelledby="settingsHeading">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">オプション</p>
+            <h2 id="settingsHeading">設定</h2>
+          </div>
+        </div>
+
+        <aside id="mobilePreview" class="mobile-preview" aria-label="設定中の確認用プレビュー" hidden>
+          <div><span id="mobilePreviewLabel">確認用プレビュー</span><button id="mobilePreviewToggle" type="button" aria-expanded="true" aria-controls="mobilePreviewCanvas">たたむ</button></div>
+          <canvas id="mobilePreviewCanvas" aria-label="現在の加工結果の縮小プレビュー"></canvas>
+        </aside>
+        <p id="modePurpose" class="mode-purpose">複数画像を縦・横・格子状に並べて、1枚にまとめます。</p>
+        <details id="importReport" class="import-report" hidden>
+          <summary>読み込めなかった画像と対処方法</summary>
+          <ul id="importReportList"></ul>
+        </details>
+        <div id="combineSettings" class="settings-stack">
+          <section class="settings-section" aria-labelledby="layoutHeading">
+            <h3 id="layoutHeading">結合レイアウト</h3>
+
+            <div class="field">
+              <label for="combineDirection">並べる方向</label>
+              <select id="combineDirection">
+                <option value="horizontal">横方向</option>
+                <option value="vertical">縦方向</option>
+                <option value="grid">グリッド</option>
+              </select>
+            </div>
+
+            <div class="field field-compact is-hidden" data-control-group="grid" hidden>
+              <label for="gridColumns">グリッドの列数</label>
+              <input id="gridColumns" type="number" inputmode="numeric" min="1" max="20" step="1" value="2" aria-describedby="gridColumnsHelp">
+              <p id="gridColumnsHelp" class="field-help">1〜20列の範囲で入力できます</p>
+            </div>
+          </section>
+
+          <section class="settings-section" aria-labelledby="combineSizeHeading">
+            <h3 id="combineSizeHeading">画像サイズ</h3>
+            <div class="field">
+              <label for="combineSizing">揃え方</label>
+              <select id="combineSizing">
+                <option value="original">そのまま</option>
+                <option value="width">幅を揃える</option>
+                <option value="height" selected>高さを揃える</option>
+                <option value="custom">指定サイズへ合わせる</option>
+              </select>
+            </div>
+
+            <div class="input-grid two-columns is-hidden" data-control-group="custom-size" hidden>
+              <div class="field">
+                <label for="targetWidth">指定幅</label>
+                <div class="input-with-unit">
+                  <input id="targetWidth" type="number" inputmode="numeric" min="1" max="32767" value="1200">
+                  <span>px</span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="targetHeight">指定高さ</label>
+                <div class="input-with-unit">
+                  <input id="targetHeight" type="number" inputmode="numeric" min="1" max="32767" value="1200">
+                  <span>px</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-section" aria-labelledby="spacingHeading">
+            <h3 id="spacingHeading">余白</h3>
+            <div class="input-grid two-columns">
+              <div class="field">
+                <label for="gapSize">画像間</label>
+                <div class="input-with-unit">
+                  <input id="gapSize" type="number" inputmode="numeric" min="0" max="2000" value="0">
+                  <span>px</span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="outerPadding">外側</label>
+                <div class="input-with-unit">
+                  <input id="outerPadding" type="number" inputmode="numeric" min="0" max="2000" value="0">
+                  <span>px</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-section" aria-labelledby="backgroundHeading">
+            <h3 id="backgroundHeading">背景</h3>
+            <div class="background-row">
+              <div class="field">
+                <label for="backgroundMode">背景色</label>
+                <select id="backgroundMode">
+                  <option value="transparent">透明</option>
+                  <option value="white">白</option>
+                  <option value="black">黒</option>
+                  <option value="custom">カスタム</option>
+                </select>
+              </div>
+              <div class="field color-field is-hidden" data-control-group="custom-background" hidden>
+                <label for="customBackground">カスタム色</label>
+                <input id="customBackground" type="color" value="#f3f4f6" aria-label="カスタム背景色">
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div id="editSettings" class="settings-stack is-hidden">
+          <section class="settings-section" aria-labelledby="cropHeading">
+            <h3 id="cropHeading">切り抜き</h3>
+            <div class="field">
+              <label for="cropRatio">切り抜き比率</label>
+              <select id="cropRatio">
+                <option value="free">自由</option>
+                <option value="1:1">1 : 1（正方形）</option>
+                <option value="4:3">4 : 3</option>
+                <option value="3:4">3 : 4</option>
+                <option value="16:9">16 : 9</option>
+                <option value="9:16">9 : 16</option>
+              </select>
+            </div>
+
+            <div class="input-grid four-columns crop-values">
+              <div class="field">
+                <label for="cropX">X</label>
+                <input id="cropX" type="number" inputmode="numeric" min="0" value="0">
+              </div>
+              <div class="field">
+                <label for="cropY">Y</label>
+                <input id="cropY" type="number" inputmode="numeric" min="0" value="0">
+              </div>
+              <div class="field">
+                <label for="cropWidth">幅</label>
+                <input id="cropWidth" type="number" inputmode="numeric" min="1" value="0">
+              </div>
+              <div class="field">
+                <label for="cropHeight">高さ</label>
+                <input id="cropHeight" type="number" inputmode="numeric" min="1" value="0">
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-section" aria-labelledby="resizeHeading">
+            <h3 id="resizeHeading">出力サイズ</h3>
+            <div class="input-grid two-columns">
+              <div class="field">
+                <label for="resizeWidth">幅</label>
+                <div class="input-with-unit">
+                  <input id="resizeWidth" type="number" inputmode="numeric" min="1" max="32767">
+                  <span>px</span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="resizeHeight">高さ</label>
+                <div class="input-with-unit">
+                  <input id="resizeHeight" type="number" inputmode="numeric" min="1" max="32767">
+                  <span>px</span>
+                </div>
+              </div>
+            </div>
+
+            <label class="checkbox-row" for="keepAspect">
+              <input id="keepAspect" type="checkbox" checked>
+              <span>縦横比を維持</span>
+            </label>
+
+            <div class="preset-grid" aria-label="出力サイズのプリセット">
+              <button id="resetSizeBtn" class="chip-button" type="button">元サイズ</button>
+              <button id="preset512Btn" class="chip-button" type="button">512×512</button>
+              <button id="preset1024Btn" class="chip-button" type="button">1024×1024</button>
+              <button id="preset1920Btn" class="chip-button" type="button">1920×1080</button>
+            </div>
+          </section>
+
+          <section class="settings-section" aria-labelledby="transformHeading">
+            <h3 id="transformHeading">回転・反転</h3>
+            <div class="button-grid two-columns">
+              <button id="rotateLeftBtn" class="button button-quiet" type="button" aria-label="画像を左へ90度回転">↶ 左90°</button>
+              <button id="rotateRightBtn" class="button button-quiet" type="button" aria-label="画像を右へ90度回転">↷ 右90°</button>
+              <button id="flipXBtn" class="button button-quiet" type="button">左右反転</button>
+              <button id="flipYBtn" class="button button-quiet" type="button">上下反転</button>
+            </div>
+          </section>
+
+          <section class="settings-section accent-section" aria-labelledby="bulkHeading">
+            <h3 id="bulkHeading">一括処理</h3>
+            <p>現在の設定を、読み込んだ画像へまとめて適用します。</p>
+            <div class="button-stack">
+              <button id="applyCropAllBtn" class="button button-secondary" type="button">この切り抜きを全画像へ適用</button>
+              <button id="applyResizeAllBtn" class="button button-secondary" type="button">このサイズを全画像へ適用</button>
+            </div>
+            <div class="bulk-presets" aria-label="全画像の一括プリセット">
+              <button id="presetSquareAllBtn" class="text-button" type="button">全画像を正方形に切り抜く</button>
+              <button id="preset169AllBtn" class="text-button" type="button">全画像を中央から16:9に切り抜く</button>
+              <button id="preset512AllBtn" class="text-button" type="button">全画像を512×512にする</button>
+              <button id="preset1920WidthAllBtn" class="text-button" type="button">全画像を1920px幅にする</button>
+            </div>
+          </section>
+        </div>
+
+        <div id="splitSettings" class="settings-stack split-settings is-hidden" hidden>
+          <section class="settings-section" aria-labelledby="splitLayoutHeading">
+            <h3 id="splitLayoutHeading">分割レイアウト</h3>
+            <p>選択した画像を、列数×行数で等分します。</p>
+
+            <div class="input-grid two-columns split-grid-inputs">
+              <div class="field">
+                <label for="splitColumns">列数（左右）</label>
+                <input
+                  id="splitColumns"
+                  type="number"
+                  inputmode="numeric"
+                  min="1"
+                  max="20"
+                  step="1"
+                  value="2"
+                  aria-describedby="splitGridHelp"
+                >
+              </div>
+              <div class="field">
+                <label for="splitRows">行数（上下）</label>
+                <input
+                  id="splitRows"
+                  type="number"
+                  inputmode="numeric"
+                  min="1"
+                  max="20"
+                  step="1"
+                  value="1"
+                  aria-describedby="splitGridHelp"
+                >
+              </div>
+            </div>
+            <p id="splitGridHelp" class="field-help">2列×1行なら左右、1列×2行なら上下、両方を増やすと格子状に分割します。</p>
+          </section>
+
+          <section class="settings-section split-result-section" aria-labelledby="splitResultHeading">
+            <h3 id="splitResultHeading">分割結果</h3>
+            <output id="splitSummary" class="split-summary" aria-live="polite">画像を選択すると分割結果を表示します</output>
+            <p class="field-help">割り切れない端数ピクセルも各画像へ配分されるため、欠けずに保存できます。</p>
+          </section>
+        </div>
+
+        <div id="filterSettings" class="settings-stack filter-settings is-hidden" hidden>
+          <section class="settings-section" aria-labelledby="filterTimeHeading">
+            <h3 id="filterTimeHeading">時間帯の雰囲気</h3>
+            <p>光と色温度のプリセットを選びます。</p>
+            <div class="filter-preset-grid filter-time-grid" role="group" aria-labelledby="filterTimeHeading">
+              <button id="filterTimeMorningBtn" class="filter-preset-button" type="button" aria-pressed="false" data-filter-time="morning">
+                <span aria-hidden="true">◒</span> 朝
+              </button>
+              <button id="filterTimeNoonBtn" class="filter-preset-button" type="button" aria-pressed="false" data-filter-time="day">
+                <span aria-hidden="true">☀</span> 昼
+              </button>
+              <button id="filterTimeEveningBtn" class="filter-preset-button" type="button" aria-pressed="false" data-filter-time="evening">
+                <span aria-hidden="true">◓</span> 夕
+              </button>
+              <button id="filterTimeNightBtn" class="filter-preset-button" type="button" aria-pressed="false" data-filter-time="night">
+                <span aria-hidden="true">☾</span> 夜
+              </button>
+              <button id="filterTimeNoneBtn" class="filter-preset-button filter-none-button is-active" type="button" aria-pressed="true" data-filter-time="none">時間帯補正なし</button>
+            </div>
+          </section>
+
+          <section class="settings-section" aria-labelledby="filterEffectHeading">
+            <h3 id="filterEffectHeading">表現スタイル</h3>
+            <div class="filter-preset-grid filter-effect-grid" role="group" aria-labelledby="filterEffectHeading">
+              <button id="filterEffectOilBtn" class="filter-preset-button" type="button" aria-pressed="false" data-filter-effect="oil">油絵</button>
+              <button id="filterEffectPosterBtn" class="filter-preset-button" type="button" aria-pressed="false" data-filter-effect="poster">ポスター</button>
+              <button id="filterEffectMonochromeBtn" class="filter-preset-button" type="button" aria-pressed="false" data-filter-effect="monochrome">モノクロ</button>
+              <button id="filterEffectSepiaBtn" class="filter-preset-button" type="button" aria-pressed="false" data-filter-effect="sepia">セピア</button>
+              <button id="filterEffectNoneBtn" class="filter-preset-button filter-none-button is-active" type="button" aria-pressed="true" data-filter-effect="none">絵画効果なし</button>
+            </div>
+
+            <div class="filter-range-field filter-primary-range">
+              <div class="label-row">
+                <label for="filterIntensity">フィルター強度</label>
+                <output id="filterIntensityValue" for="filterIntensity">70%</output>
+              </div>
+              <input id="filterIntensity" type="range" min="0" max="100" step="1" value="70">
+              <div class="filter-range-scale" aria-hidden="true"><span>弱い</span><span>強い</span></div>
+            </div>
+          </section>
+
+          <section id="filterOilSettings" class="settings-section filter-effect-settings is-hidden" data-filter-effect-settings="oil" aria-labelledby="filterOilHeading" hidden>
+            <h3 id="filterOilHeading">油絵の質感</h3>
+            <div class="filter-range-list">
+              <div class="filter-range-field">
+                <div class="label-row">
+                  <label for="filterOilColor">色数</label>
+                  <output id="filterOilColorValue" for="filterOilColor">70%</output>
+                </div>
+                <input id="filterOilColor" type="range" min="0" max="100" step="1" value="70">
+                <div class="filter-range-scale" aria-hidden="true"><span>少ない</span><span>多い</span></div>
+              </div>
+              <div class="filter-range-field">
+                <div class="label-row">
+                  <label for="filterOilBrush">筆の大きさ</label>
+                  <output id="filterOilBrushValue" for="filterOilBrush">8</output>
+                </div>
+                <input id="filterOilBrush" type="range" min="1" max="20" step="1" value="8">
+                <div class="filter-range-scale" aria-hidden="true"><span>弱い</span><span>強い</span></div>
+              </div>
+              <div class="filter-range-field">
+                <div class="label-row">
+                  <label for="filterOilEdge">輪郭</label>
+                  <output id="filterOilEdgeValue" for="filterOilEdge">35%</output>
+                </div>
+                <input id="filterOilEdge" type="range" min="0" max="100" step="1" value="35">
+                <div class="filter-range-scale" aria-hidden="true"><span>弱い</span><span>強い</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section id="filterPosterSettings" class="settings-section filter-effect-settings is-hidden" data-filter-effect-settings="poster" aria-labelledby="filterPosterHeading" hidden>
+            <h3 id="filterPosterHeading">ポスター表現</h3>
+            <div class="filter-range-list">
+              <div class="filter-range-field">
+                <div class="label-row">
+                  <label for="filterPosterLevels">色の段階</label>
+                  <output id="filterPosterLevelsValue" for="filterPosterLevels">6段階</output>
+                </div>
+                <input id="filterPosterLevels" type="range" min="2" max="16" step="1" value="6">
+              </div>
+              <div class="filter-range-field">
+                <div class="label-row">
+                  <label for="filterPosterEdge">輪郭</label>
+                  <output id="filterPosterEdgeValue" for="filterPosterEdge">40%</output>
+                </div>
+                <input id="filterPosterEdge" type="range" min="0" max="100" step="1" value="40">
+              </div>
+            </div>
+          </section>
+
+          <details id="filterAdvancedSettings" class="filter-details settings-section">
+            <summary>詳細調整</summary>
+            <div class="filter-details-content">
+              <div class="filter-range-list">
+                <div class="filter-range-field">
+                  <div class="label-row"><label for="filterBrightness">明るさ</label><output id="filterBrightnessValue" for="filterBrightness">0</output></div>
+                  <input id="filterBrightness" type="range" min="-100" max="100" step="1" value="0">
+                </div>
+                <div class="filter-range-field">
+                  <div class="label-row"><label for="filterContrast">コントラスト</label><output id="filterContrastValue" for="filterContrast">0</output></div>
+                  <input id="filterContrast" type="range" min="-100" max="100" step="1" value="0">
+                </div>
+                <div class="filter-range-field">
+                  <div class="label-row"><label for="filterSaturation">彩度</label><output id="filterSaturationValue" for="filterSaturation">0</output></div>
+                  <input id="filterSaturation" type="range" min="-100" max="100" step="1" value="0">
+                </div>
+                <div class="filter-range-field">
+                  <div class="label-row"><label for="filterTemperature">色温度</label><output id="filterTemperatureValue" for="filterTemperature">0</output></div>
+                  <input id="filterTemperature" type="range" min="-100" max="100" step="1" value="0">
+                </div>
+                <div class="filter-range-field">
+                  <div class="label-row"><label for="filterTint">色かぶり</label><output id="filterTintValue" for="filterTint">0</output></div>
+                  <input id="filterTint" type="range" min="-100" max="100" step="1" value="0">
+                </div>
+                <div class="filter-range-field">
+                  <div class="label-row"><label for="filterHighlights">ハイライト</label><output id="filterHighlightsValue" for="filterHighlights">0</output></div>
+                  <input id="filterHighlights" type="range" min="-100" max="100" step="1" value="0">
+                </div>
+                <div class="filter-range-field">
+                  <div class="label-row"><label for="filterShadows">シャドウ</label><output id="filterShadowsValue" for="filterShadows">0</output></div>
+                  <input id="filterShadows" type="range" min="-100" max="100" step="1" value="0">
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <section class="settings-section filter-actions-section" aria-labelledby="filterActionsHeading">
+            <h3 id="filterActionsHeading">比較・一括処理</h3>
+            <button id="filterCompareBtn" class="button button-quiet button-full filter-compare-button" type="button" aria-pressed="false" aria-describedby="filterCompareHelp">
+              <span aria-hidden="true">◐</span> 押している間、加工前を表示
+            </button>
+            <p id="filterCompareHelp" class="field-help">マウス、タッチ、Space／Enterキーで押し続けると元画像と比較できます。</p>
+            <div class="filter-action-grid">
+              <button id="filterApplyAllBtn" class="button button-secondary" type="button">このフィルターを全画像へ適用</button>
+              <button id="filterExportVariantsBtn" class="button button-secondary" type="button" aria-describedby="filterVariantsHelp">朝・昼・夕・夜をまとめて作る</button>
+            </div>
+            <p id="filterVariantsHelp" class="field-help">朝・昼・夕・夜の4バリエーションを書き出します。</p>
+          </section>
+
+          <section class="settings-section filter-finish-section" aria-labelledby="filterFinishHeading">
+            <div class="filter-finish-heading-row">
+              <div>
+                <p class="eyebrow">最終合成</p>
+                <h3 id="filterFinishHeading">仕上げ</h3>
+              </div>
+              <span id="filterFinishLayerCount" class="count-badge" aria-live="polite">0層</span>
+            </div>
+            <p class="filter-finish-description">額縁・透過PNG・光・紙テクスチャなどを、フィルター後の画像の前面／背面へ重ねます。</p>
+
+            <input
+              id="filterFinishInput"
+              class="visually-hidden"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+              multiple
+              aria-label="仕上げに使う画像素材を選択"
+              disabled
+            >
+            <button id="filterFinishAddBtn" class="button button-secondary button-full filter-finish-add-button" type="button" disabled>
+              <span aria-hidden="true">＋</span> 仕上げ素材を追加
+            </button>
+
+            <p class="list-help filter-finish-order-help">上ほど手前です。「加工画像」が前面と背面の境目です。ドラッグまたはAlt＋↑↓で順番を変更できます。</p>
+            <div id="filterFinishLayerList" class="filter-finish-layer-list" role="list" aria-label="仕上げレイヤー一覧。上ほど手前です。加工画像より上は前面、下は背面です"></div>
+            <div id="filterFinishEmpty" class="filter-finish-empty empty-list-note">
+              <span aria-hidden="true">▱</span>
+              <p>追加した額縁や装飾素材がここに並びます</p>
+            </div>
+          </section>
+
+          <section class="settings-section filter-finish-selected-section" aria-labelledby="filterFinishSelectedHeading">
+            <h3 id="filterFinishSelectedHeading">選択中の仕上げ素材</h3>
+            <div class="field">
+              <label for="filterFinishName">素材名</label>
+              <input id="filterFinishName" class="text-input" type="text" maxlength="120" autocomplete="off" placeholder="素材名" disabled>
+            </div>
+
+            <div class="input-grid two-columns filter-finish-numeric-grid">
+              <div class="field">
+                <label for="filterFinishX">左端X</label>
+                <div class="input-with-unit">
+                  <input id="filterFinishX" type="number" inputmode="decimal" min="-500" max="500" step="0.1" value="0" disabled>
+                  <span>%</span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="filterFinishY">上端Y</label>
+                <div class="input-with-unit">
+                  <input id="filterFinishY" type="number" inputmode="decimal" min="-500" max="500" step="0.1" value="0" disabled>
+                  <span>%</span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="filterFinishWidth">幅</label>
+                <div class="input-with-unit">
+                  <input id="filterFinishWidth" type="number" inputmode="decimal" min="0.1" max="1000" step="0.1" value="100" disabled>
+                  <span>%</span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="filterFinishHeight">高さ</label>
+                <div class="input-with-unit">
+                  <input id="filterFinishHeight" type="number" inputmode="decimal" min="0.1" max="1000" step="0.1" value="100" disabled>
+                  <span>%</span>
+                </div>
+              </div>
+            </div>
+
+            <label class="checkbox-row" for="filterFinishKeepAspect">
+              <input id="filterFinishKeepAspect" type="checkbox" checked disabled>
+              <span>縦横比を維持</span>
+            </label>
+
+            <div class="input-grid two-columns">
+              <div class="field">
+                <label for="filterFinishRotation">回転</label>
+                <div class="input-with-unit">
+                  <input id="filterFinishRotation" type="number" inputmode="decimal" min="-360" max="360" step="1" value="0" disabled>
+                  <span>°</span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="filterFinishOpacity">不透明度</label>
+                <div class="filter-finish-opacity-field">
+                  <input id="filterFinishOpacity" type="range" min="0" max="100" step="1" value="100" disabled>
+                  <output id="filterFinishOpacityValue" for="filterFinishOpacity">—</output>
+                </div>
+              </div>
+            </div>
+
+            <div class="field field-compact">
+              <label for="filterFinishBlendMode">合成モード</label>
+              <select id="filterFinishBlendMode" disabled>
+                <option value="normal">通常</option>
+                <option value="multiply">乗算</option>
+                <option value="screen">スクリーン</option>
+                <option value="overlay">オーバーレイ</option>
+              </select>
+            </div>
+
+            <div class="field field-compact">
+              <label for="filterFinishPlacement">重ねる位置</label>
+              <select id="filterFinishPlacement" aria-describedby="filterFinishPlacementHelp" disabled>
+                <option value="front">画像の前面</option>
+                <option value="behind">画像の背面</option>
+              </select>
+              <p id="filterFinishPlacementHelp" class="field-help">背面にすると、加工画像の透明部分から素材が見えます。</p>
+            </div>
+
+            <div class="filter-finish-state-grid" role="group" aria-label="仕上げ素材の状態">
+              <button id="filterFinishVisibilityBtn" class="chip-button" type="button" aria-pressed="true" disabled>表示中</button>
+              <button id="filterFinishFrameBtn" class="chip-button" type="button" aria-pressed="false" aria-describedby="filterFinishFrameHelp" disabled>フレームとして使用</button>
+              <button id="filterFinishDeleteBtn" class="chip-button chip-button-danger" type="button" disabled>素材を削除</button>
+            </div>
+            <p id="filterFinishFrameHelp" class="field-help">フレーム指定すると、画像サイズが変わっても全体へ自動追従します。</p>
+
+            <div class="field field-compact">
+              <label for="filterFinishFitMode">フレームの合わせ方</label>
+              <select id="filterFinishFitMode" disabled>
+                <option value="stretch">全体を伸縮</option>
+                <option value="center">比率維持＋中央（原寸・縮小のみ）</option>
+                <option value="cover">Cover（全面を覆う）</option>
+                <option value="contain">Contain（全体を収める）</option>
+              </select>
+            </div>
+
+            <div class="filter-finish-order-grid" role="group" aria-label="仕上げ素材の重なり順">
+              <button id="filterFinishBringFrontBtn" class="chip-button" type="button" disabled>最前面</button>
+              <button id="filterFinishForwardBtn" class="chip-button" type="button" disabled>前面へ</button>
+              <button id="filterFinishBackwardBtn" class="chip-button" type="button" disabled>背面へ</button>
+              <button id="filterFinishSendBackBtn" class="chip-button" type="button" disabled>最背面</button>
+            </div>
+          </section>
+
+          <section class="settings-section filter-finish-placement-section" aria-labelledby="filterFinishPlacementHeading">
+            <h3 id="filterFinishPlacementHeading">配置</h3>
+            <div class="filter-finish-placement-grid" role="group" aria-labelledby="filterFinishPlacementHeading">
+              <button id="filterFinishFitCanvasBtn" class="chip-button filter-finish-primary-placement" type="button" disabled>画像全体に合わせる</button>
+              <button id="filterFinishFitWidthBtn" class="chip-button" type="button" disabled>幅に合わせる</button>
+              <button id="filterFinishFitHeightBtn" class="chip-button" type="button" disabled>高さに合わせる</button>
+              <button id="filterFinishPlaceCenterBtn" class="chip-button" type="button" disabled>中央</button>
+              <button id="filterFinishPlaceTopLeftBtn" class="chip-button" type="button" disabled>左上</button>
+              <button id="filterFinishPlaceTopRightBtn" class="chip-button" type="button" disabled>右上</button>
+              <button id="filterFinishPlaceBottomLeftBtn" class="chip-button" type="button" disabled>左下</button>
+              <button id="filterFinishPlaceBottomRightBtn" class="chip-button" type="button" disabled>右下</button>
+            </div>
+          </section>
+
+          <section class="settings-section accent-section filter-finish-batch-section" aria-labelledby="filterFinishBatchHeading">
+            <h3 id="filterFinishBatchHeading">一括適用</h3>
+            <p>位置とサイズは画像に対する割合でコピーされるため、異なる大きさの画像にも合わせられます。</p>
+            <div class="button-stack">
+              <button id="filterApplyFinishAllBtn" class="button button-secondary" type="button" disabled>この仕上げを全画像へ適用</button>
+              <button id="filterApplyFilterFinishAllBtn" class="button button-primary" type="button" disabled>フィルター＋仕上げを全画像へ適用</button>
+            </div>
+          </section>
+        </div>
+
+        <div id="canvasSettings" class="settings-stack is-hidden" hidden>
+          <section class="settings-section" aria-labelledby="canvasSizeHeading">
+            <h3 id="canvasSizeHeading">キャンバスサイズ</h3>
+            <div class="input-grid two-columns">
+              <div class="field">
+                <label for="canvasWidth">幅</label>
+                <div class="input-with-unit">
+                  <input id="canvasWidth" type="number" inputmode="numeric" min="1" max="32767" value="1920">
+                  <span>px</span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="canvasHeight">高さ</label>
+                <div class="input-with-unit">
+                  <input id="canvasHeight" type="number" inputmode="numeric" min="1" max="32767" value="1080">
+                  <span>px</span>
+                </div>
+              </div>
+            </div>
+            <div class="preset-grid canvas-preset-grid" role="group" aria-label="キャンバスサイズのプリセット">
+              <button id="canvasPreset800Btn" class="chip-button" type="button">800×600</button>
+              <button id="canvasPreset1200Btn" class="chip-button" type="button">1200×800</button>
+              <button id="canvasPreset1920Btn" class="chip-button" type="button">1920×1080</button>
+              <button id="canvasPresetSquareBtn" class="chip-button" type="button">1080×1080</button>
+              <button id="canvasPresetPortraitBtn" class="chip-button" type="button">1080×1920</button>
+            </div>
+          </section>
+
+          <section class="settings-section" aria-labelledby="canvasBackgroundHeading">
+            <h3 id="canvasBackgroundHeading">背景</h3>
+            <div class="background-row">
+              <div class="field">
+                <label for="canvasBackgroundMode">背景色</label>
+                <select id="canvasBackgroundMode">
+                  <option value="transparent" selected>透明</option>
+                  <option value="white">白</option>
+                  <option value="black">黒</option>
+                  <option value="custom">カスタム</option>
+                  <option value="image">背景画像</option>
+                </select>
+              </div>
+              <div class="field color-field is-hidden" data-control-group="canvas-custom-background" hidden>
+                <label for="canvasBackgroundColor">色</label>
+                <input id="canvasBackgroundColor" type="color" value="#ffffff" aria-label="キャンバスのカスタム背景色">
+              </div>
+            </div>
+            <input id="canvasBackgroundInput" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" aria-label="背景にする画像を選択">
+            <button id="canvasBackgroundBtn" class="button button-quiet button-full canvas-background-button" type="button">背景画像を追加</button>
+          </section>
+
+          <section class="settings-section" aria-labelledby="canvasLayerSettingsHeading">
+            <h3 id="canvasLayerSettingsHeading">選択レイヤー</h3>
+            <div class="field">
+              <label for="canvasLayerName">レイヤー名</label>
+              <input id="canvasLayerName" class="text-input" type="text" maxlength="120" autocomplete="off" placeholder="画像名">
+            </div>
+            <div class="input-grid two-columns canvas-transform-grid">
+              <div class="field">
+                <label for="canvasLayerX">X</label>
+                <input id="canvasLayerX" type="number" inputmode="numeric" step="1" value="0">
+              </div>
+              <div class="field">
+                <label for="canvasLayerY">Y</label>
+                <input id="canvasLayerY" type="number" inputmode="numeric" step="1" value="0">
+              </div>
+              <div class="field">
+                <label for="canvasLayerWidth">幅</label>
+                <input id="canvasLayerWidth" type="number" inputmode="numeric" min="1" max="32767" value="1">
+              </div>
+              <div class="field">
+                <label for="canvasLayerHeight">高さ</label>
+                <input id="canvasLayerHeight" type="number" inputmode="numeric" min="1" max="32767" value="1">
+              </div>
+            </div>
+            <label class="checkbox-row" for="canvasLayerKeepAspect">
+              <input id="canvasLayerKeepAspect" type="checkbox" checked>
+              <span>縦横比を維持</span>
+            </label>
+            <div class="input-grid two-columns">
+              <div class="field">
+                <label for="canvasLayerRotation">回転</label>
+                <div class="input-with-unit">
+                  <input id="canvasLayerRotation" type="number" inputmode="decimal" min="-360" max="360" step="1" value="0">
+                  <span>°</span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="canvasLayerOpacity">不透明度</label>
+                <div class="layer-opacity-field">
+                  <input id="canvasLayerOpacity" type="range" min="0" max="100" step="1" value="100">
+                  <output id="canvasOpacityValue" for="canvasLayerOpacity">100%</output>
+                </div>
+              </div>
+            </div>
+
+            <div class="canvas-rotation-controls" role="group" aria-label="レイヤーの回転">
+              <button id="canvasRotateMinusBtn" class="chip-button" type="button">−1°</button>
+              <button id="canvasRotatePlusBtn" class="chip-button" type="button">＋1°</button>
+              <button id="canvasRotateLeftBtn" class="chip-button" type="button">左90°</button>
+              <button id="canvasRotateRightBtn" class="chip-button" type="button">右90°</button>
+            </div>
+            <div class="canvas-command-group" role="group" aria-label="レイヤーの表示と編集">
+              <button id="canvasVisibilityBtn" class="chip-button" type="button" aria-pressed="true">表示中</button>
+              <button id="canvasLockBtn" class="chip-button" type="button" aria-pressed="false">ロック</button>
+              <button id="canvasDuplicateBtn" class="chip-button" type="button">複製</button>
+              <button id="canvasDeleteBtn" class="chip-button chip-button-danger" type="button">削除</button>
+            </div>
+            <div class="canvas-command-group" role="group" aria-label="レイヤーの重なり順">
+              <button id="canvasBringFrontBtn" class="chip-button" type="button">最前面</button>
+              <button id="canvasBringForwardBtn" class="chip-button" type="button">前面へ</button>
+              <button id="canvasSendBackwardBtn" class="chip-button" type="button">背面へ</button>
+              <button id="canvasSendBackBtn" class="chip-button" type="button">最背面</button>
+            </div>
+            <div class="button-grid two-columns" role="group" aria-label="レイヤーの反転">
+              <button id="canvasFlipXBtn" class="button button-quiet" type="button">左右反転</button>
+              <button id="canvasFlipYBtn" class="button button-quiet" type="button">上下反転</button>
+            </div>
+          </section>
+
+          <section class="settings-section" aria-labelledby="canvasAlignHeading">
+            <h3 id="canvasAlignHeading">整列・フィット</h3>
+            <div class="canvas-align-grid" role="group" aria-label="キャンバス中央に整列">
+              <button id="canvasAlignHorizontalBtn" class="chip-button" type="button">左右中央</button>
+              <button id="canvasAlignVerticalBtn" class="chip-button" type="button">上下中央</button>
+              <button id="canvasAlignCenterBtn" class="chip-button" type="button">完全中央</button>
+            </div>
+            <div class="canvas-align-grid canvas-fit-grid" role="group" aria-label="キャンバスへフィット">
+              <button id="canvasFitWidthBtn" class="chip-button" type="button">幅に合わせる</button>
+              <button id="canvasFitHeightBtn" class="chip-button" type="button">高さに合わせる</button>
+              <button id="canvasFitCanvasBtn" class="chip-button" type="button">全体に収める</button>
+            </div>
+          </section>
+
+          <section class="settings-section" aria-labelledby="canvasAssistHeading">
+            <h3 id="canvasAssistHeading">スナップ・ガイド</h3>
+            <div class="canvas-toggle-grid">
+              <label class="checkbox-row" for="canvasSnap">
+                <input id="canvasSnap" type="checkbox" checked>
+                <span>中央・四辺へ吸着</span>
+              </label>
+              <label class="checkbox-row" for="canvasGridVisible">
+                <input id="canvasGridVisible" type="checkbox">
+                <span>グリッドを表示</span>
+              </label>
+            </div>
+            <div class="field field-compact">
+              <label for="canvasGridSize">グリッド間隔</label>
+              <div class="input-with-unit">
+                <input id="canvasGridSize" type="number" inputmode="numeric" min="2" max="500" step="1" value="20">
+                <span>px</span>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <section class="settings-section output-section" aria-labelledby="outputHeading">
+          <h3 id="outputHeading">保存形式</h3>
+          <div class="field">
+            <label for="outputFormat">ファイル形式</label>
+            <select id="outputFormat">
+              <option value="png">PNG</option>
+              <option value="jpeg">JPEG</option>
+              <option value="webp">WebP</option>
+            </select>
+          </div>
+          <div class="quality-field is-hidden" data-control-group="quality" hidden>
+            <div class="label-row">
+              <label for="outputQuality">画質</label>
+              <output id="qualityValue" for="outputQuality">90%</output>
+            </div>
+            <input id="outputQuality" type="range" min="10" max="100" step="1" value="90" aria-describedby="qualityHelp">
+            <p id="qualityHelp" class="field-help">JPEG・WebPで使用します</p>
+          </div>
+          <p id="transparencyFormatHint" class="field-help output-format-hint is-hidden" role="status" hidden>透明部分を残す場合はPNGがおすすめです。JPEGでは透明部分が白になります。</p>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="action-bar">
+      <div class="footer-notes">
+        <p id="statusMessage" class="status-message" role="status" aria-live="polite">画像を追加して開始してください</p>
+        <p id="privacyNote" class="privacy-note"><span aria-hidden="true">●</span> 画像は外部送信されず、このブラウザ内だけで処理されます</p>
+      </div>
+      <div class="footer-actions">
+        <button id="undoRemovalBtn" class="button button-secondary is-hidden" type="button" hidden>削除を取り消す</button>
+        <button id="undoImagesBtn" class="button button-quiet" type="button" disabled title="画像の操作を1つ戻す（Ctrl / ⌘＋Z）">元に戻す</button>
+        <button id="redoImagesBtn" class="button button-quiet" type="button" disabled title="戻した操作をやり直す（Ctrl / ⌘＋Shift＋Z）">やり直す</button>
+        <button id="canvasUndoBtn" class="button button-quiet canvas-only-action is-hidden" type="button" hidden>元に戻す</button>
+        <button id="canvasRedoBtn" class="button button-quiet canvas-only-action is-hidden" type="button" hidden>やり直す</button>
+        <button id="resetCurrentBtn" class="button button-quiet" type="button">この画像を元に戻す</button>
+        <button id="resetAllBtn" class="button button-quiet" type="button">すべてリセット</button>
+        <button id="clearAllBtn" class="button button-danger-quiet" type="button">すべて削除</button>
+        <button id="exportBtn" class="button button-primary export-button" type="button" disabled>結合画像を保存</button>
+      </div>
+    </footer>
+  </div>
+
+  <dialog id="helpDialog" class="app-dialog help-dialog" aria-modal="true" aria-labelledby="helpDialogTitle" aria-describedby="helpDialogDescription">
+    <div class="app-dialog__surface">
+      <header class="app-dialog__header">
+        <div class="app-dialog__heading">
+          <span class="app-dialog__heading-icon" aria-hidden="true">?</span>
+          <div>
+            <h2 id="helpDialogTitle">ヘルプ</h2>
+            <p id="helpDialogDescription">基本の流れと、すばやく操作する方法を確認できます。</p>
+          </div>
+        </div>
+        <button id="helpDialogClose" class="app-dialog__close" type="button" aria-label="ヘルプを閉じる">×</button>
+      </header>
+
+      <div class="app-dialog__tabs" role="tablist" aria-label="ヘルプの内容">
+        <button id="helpUsageTab" class="app-dialog__tab is-active" type="button" role="tab" aria-selected="true" aria-controls="helpUsagePanel" tabindex="0">使い方</button>
+        <button id="helpShortcutsTab" class="app-dialog__tab" type="button" role="tab" aria-selected="false" aria-controls="helpShortcutsPanel" tabindex="-1">ショートカット</button>
+      </div>
+
+      <div class="app-dialog__body">
+        <section id="helpUsagePanel" role="tabpanel" aria-labelledby="helpUsageTab" tabindex="0">
+          <div class="reading-preference"><span>文字やボタンを大きく表示できます。</span><button id="readableUiBtn" type="button" class="button button-secondary" aria-pressed="false">読みやすい表示</button></div>
+          <div class="help-card-grid">
+            <article class="help-card">
+              <span class="help-card__number" aria-hidden="true">1</span>
+              <div><h3>画像を追加する</h3><p>左側の追加ボタン、ドラッグ＆ドロップ、またはファイル選択から画像を読み込みます。</p></div>
+            </article>
+            <article class="help-card">
+              <span class="help-card__number" aria-hidden="true">2</span>
+              <div><h3>加工方法を選ぶ</h3><p>画像結合・画像分割・画像編集・画像合成・画像加工から目的に合うモードを選びます。</p></div>
+            </article>
+            <article class="help-card">
+              <span class="help-card__number" aria-hidden="true">3</span>
+              <div><h3>設定を調整する</h3><p>右側の設定を変更し、中央のプレビューで仕上がりを確認します。</p></div>
+            </article>
+            <article class="help-card">
+              <span class="help-card__number" aria-hidden="true">4</span>
+              <div><h3>設定・作業を保存する</h3><p>設定だけを使い回すならプリセット、画像や配置も含めて再開するなら「作業ファイルを保存」を使います。</p></div>
+            </article>
+            <article class="help-card">
+              <span class="help-card__number" aria-hidden="true">5</span>
+              <div><h3>完成画像を保存する</h3><p>画面下部から書き出します。編集・加工ではチェックした画像だけを保存でき、複数画像はZIPにまとめられます。</p></div>
+            </article>
+          </div>
+          <details class="privacy-help"><summary>画像と設定はどこに残りますか？</summary><p>読み込んだ画像と操作履歴は、このページを開いている間だけ保持します。素材を削除しても、取り消せる間は履歴に残ります。画像の履歴は40段階、合成の履歴は60段階です。ページの再読み込みや終了後は復元できないため、続きは作業ファイルに保存してください。</p><p>プリセットは同じブラウザ内に残ります。「設定保存」で選択して削除するか、ブラウザのサイトデータを消すと削除できます。作業ファイルや完成画像はダウンロード先に残り、ブラウザのデータを消しても削除されません。元の画像ファイルは変更しません。</p></details>
+        </section>
+
+        <section id="helpShortcutsPanel" role="tabpanel" aria-labelledby="helpShortcutsTab" tabindex="0" hidden>
+          <dl class="shortcut-list">
+            <div><dt><kbd>Tab</kbd> / <kbd>Shift</kbd>＋<kbd>Tab</kbd></dt><dd>ボタンや入力欄の間を移動します。</dd></div>
+            <div><dt><kbd>Enter</kbd> / <kbd>Space</kbd></dt><dd>選択中のボタンを実行します。画像加工の比較ボタンでは、押している間だけ加工前を表示します。</dd></div>
+            <div><dt><kbd>Esc</kbd></dt><dd>開いているヘルプや更新情報、設定保存の画面を閉じます。</dd></div>
+            <div><dt><kbd>Ctrl</kbd> / <kbd>⌘</kbd>＋<kbd>Z</kbd></dt><dd>直前の操作を元に戻します。Shiftを加えるとやり直します。文字入力中は入力欄の取り消しが優先されます。</dd></div>
+            <div><dt><kbd>Delete</kbd></dt><dd>画像合成モードで選択中のレイヤーを削除します。</dd></div>
+          </dl>
+        </section>
+      </div>
+
+      <footer class="app-dialog__footer app-dialog__footer--split">
+        <a id="contactLink" class="dialog-contact-link" href="https://tetoriapot.sakura.ne.jp/index.html" target="_blank" rel="noopener noreferrer" aria-label="TeToriapotへ問い合わせ（新しいタブ）">
+          <span aria-hidden="true">↗</span> お問い合わせ <small>TeToriapot</small>
+        </a>
+        <button id="helpDialogFooterClose" class="button button-primary" type="button">閉じる</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <dialog id="updatesDialog" class="app-dialog updates-dialog" aria-modal="true" aria-labelledby="updatesDialogTitle" aria-describedby="updatesDialogDescription">
+    <div class="app-dialog__surface">
+      <header class="app-dialog__header">
+        <div class="app-dialog__heading">
+          <span class="app-dialog__heading-icon" aria-hidden="true">↻</span>
+          <div>
+            <h2 id="updatesDialogTitle">更新情報</h2>
+            <p id="updatesDialogDescription">主な追加・変更を新しい順に掲載しています。</p>
+          </div>
+        </div>
+        <button id="updatesDialogClose" class="app-dialog__close" type="button" aria-label="更新情報を閉じる">×</button>
+      </header>
+
+      <div class="app-dialog__body update-card-list">
+        <article class="update-card">
+          <div class="update-card__meta"><time datetime="2026-09-19">2026.09.19</time><span>最新</span></div>
+          <h3>取り消し・作業保存・まとめて処理を追加</h3>
+          <ul><li>画像の加工や素材削除を段階的に取り消せるようにしました。</li><li>素材と配置を含む作業ファイルの保存・再開に対応しました。</li><li>チェックした画像への加工・保存とZIP保存を追加しました。</li><li>スマホの確認用プレビュー、読みやすい表示、モードの案内を追加しました。</li></ul>
+        </article>
+        <article class="update-card">
+          <div class="update-card__meta"><time datetime="2026-09-13">2026.09.13</time></div>
+          <h3>ヘルプと設定保存を見やすく整理</h3>
+          <ul>
+            <li>ヘッダーからヘルプ・更新情報・設定保存を大きな画面で開けるようにしました。</li>
+            <li>保存済み設定を更新日時つきのカードから選べるようにしました。</li>
+            <li>基本操作とショートカットを切り替えて確認できるようにしました。</li>
+          </ul>
+        </article>
+        <article class="update-card">
+          <div class="update-card__meta"><time datetime="2026-09-05">2026.09.05</time></div>
+          <h3>画像加工と仕上げレイヤーを改善</h3>
+          <ul>
+            <li>仕上げ素材を加工画像の前面・背面へ配置できるようにしました。</li>
+            <li>仕上げ欄の説明、ボタン、補足文の余白を読みやすく調整しました。</li>
+          </ul>
+        </article>
+        <article class="update-card">
+          <div class="update-card__meta"><time datetime="2026-08-28">2026.08.28</time></div>
+          <h3>分割・結合・素材管理を拡張</h3>
+          <ul>
+            <li>画像分割モードと、画像一覧の一括削除を追加しました。</li>
+            <li>グリッドの列数を1〜20列の範囲で数値指定できるようにしました。</li>
+            <li>各設定欄のずれや不要な余白を修正しました。</li>
+          </ul>
+        </article>
+      </div>
+
+      <footer class="app-dialog__footer">
+        <button id="updatesDialogFooterClose" class="button button-primary" type="button">閉じる</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <dialog id="processingPresetDialog" class="app-dialog preset-dialog" aria-modal="true" aria-labelledby="processingPresetDialogTitle" aria-describedby="processingPresetDialogDescription">
+    <div class="app-dialog__surface">
+      <header class="app-dialog__header">
+        <div class="app-dialog__heading">
+          <span class="app-dialog__heading-icon" aria-hidden="true">◇</span>
+          <div>
+            <h2 id="processingPresetDialogTitle">設定の保存・呼び出し</h2>
+            <p id="processingPresetDialogDescription">よく使う加工設定を、この端末のブラウザ内に保存できます。</p>
+          </div>
+        </div>
+        <button id="processingPresetDialogClose" class="app-dialog__close" type="button" aria-label="設定保存を閉じる">×</button>
+      </header>
+
+      <div class="app-dialog__body preset-dialog__body">
+        <section class="project-panel" aria-labelledby="projectHeading">
+          <div><h3 id="projectHeading">作業を保存・再開</h3><p>画像素材・仕上げ・レイヤー配置・全モードの加工状態を1つのファイルに保存します。続きから再開するときに使います。</p></div>
+          <div class="project-actions">
+            <button id="saveProjectBtn" type="button" class="button button-primary">作業ファイルを保存</button>
+            <button id="openProjectBtn" type="button" class="button button-secondary">作業ファイルを開く</button>
+            <input id="projectFileInput" class="visually-hidden" type="file" accept=".json,application/json" aria-label="保存した作業ファイルを選択">
+          </div>
+          <p class="field-help">元画像も含まれます。ファイルの共有先にご注意ください。履歴とプリセット一覧は含みません。素材合計100MB・120MP・500素材まで。</p>
+          <p id="projectImportSummary" class="project-import-summary" hidden></p>
+          <div class="project-actions">
+            <button id="confirmProjectOpenBtn" type="button" class="button button-primary" hidden>現在の作業を置き換えて開く</button>
+            <button id="cancelProjectOpenBtn" type="button" class="button button-quiet" hidden>読み込みを取り消す</button>
+          </div>
+          <p id="projectStatus" role="status" aria-live="polite"></p>
+        </section>
+        <div class="save-scope-note"><strong>プリセットは「設定だけ」の保存です。</strong>下のプリセットには画像やレイヤー配置は入りません。ブラウザを閉じる前に作業を残す場合は、上の作業ファイルを保存してください。</div>
+        <section id="processingPresetSection" class="processing-preset-section" aria-labelledby="processingPresetHeading">
+          <div class="preset-dialog-grid">
+            <section class="preset-create-panel" aria-labelledby="processingPresetHeading">
+              <div class="processing-preset-heading">
+                <div>
+                  <p class="eyebrow">現在の設定</p>
+                  <h3 id="processingPresetHeading">プリセットとして保存</h3>
+                </div>
+                <span id="processingPresetMode" class="processing-preset-mode">画像結合</span>
+              </div>
+              <p>現在のモードの設定に名前を付けて保存します。</p>
+
+              <div class="field">
+                <label for="processingPresetName">プリセット名</label>
+                <input id="processingPresetName" class="text-input" type="text" maxlength="60" autocomplete="off" placeholder="例：SNS投稿用">
+              </div>
+              <button id="saveProcessingPresetBtn" class="button button-primary button-full processing-preset-save" type="button" title="現在のモードの加工設定を、この端末のブラウザ内へ保存します">現在の設定を保存</button>
+              <p class="field-help processing-preset-help">同じモード・名前で保存すると更新します。画像素材、仕上げ素材、キャンバスのレイヤー画像は保存されません。</p>
+              <p id="processingPresetDialogStatus" class="preset-dialog-status" role="status" aria-live="polite"></p>
+            </section>
+
+            <section class="preset-library-panel" aria-labelledby="processingPresetListHeading">
+              <div class="preset-library-heading">
+                <div>
+                  <p class="eyebrow">このモード</p>
+                  <h3 id="processingPresetListHeading">保存済み設定</h3>
+                </div>
+                <span id="processingPresetCount" class="preset-count" aria-live="polite">0件</span>
+              </div>
+
+              <div class="field preset-search-field">
+                <label class="visually-hidden" for="processingPresetSearch">保存済み設定を検索</label>
+                <span class="preset-search-icon" aria-hidden="true">⌕</span>
+                <input id="processingPresetSearch" class="text-input" type="search" autocomplete="off" placeholder="設定名を検索">
+              </div>
+
+              <label class="visually-hidden" for="processingPresetSelect">選択中の保存設定</label>
+              <select id="processingPresetSelect" class="visually-hidden" tabindex="-1" aria-hidden="true">
+                <option value="">保存済み設定はありません</option>
+              </select>
+
+              <div id="processingPresetList" class="processing-preset-list" role="list" aria-label="保存済み設定の一覧"></div>
+              <p id="processingPresetEmpty" class="preset-empty-note">このモードの保存済み設定はありません。</p>
+
+              <div class="button-grid two-columns processing-preset-actions">
+                <button id="applyProcessingPresetBtn" class="button button-primary" type="button" title="選択した保存設定を現在のモードへ適用します" disabled>選択した設定を適用</button>
+                <button id="deleteProcessingPresetBtn" class="button button-danger-quiet" type="button" title="選択した保存設定だけを端末から削除します" disabled>保存設定を削除</button>
+              </div>
+            </section>
+          </div>
+        </section>
+      </div>
+
+      <footer class="app-dialog__footer">
+        <p><span aria-hidden="true">●</span> プリセットはこのブラウザ内、作業ファイルはダウンロード先に保存します。外部送信はしません。</p>
+        <button id="processingPresetDialogFooterClose" class="button button-primary" type="button">閉じる</button>
+      </footer>
+    </div>
+  </dialog>
+</body>
+</html>
