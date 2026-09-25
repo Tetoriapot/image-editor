@@ -41,7 +41,7 @@
           >画像分割<span id="modeSplitTooltip" class="ui-tooltip" role="tooltip">選択した画像を行・列で分割します</span></button>
           <button
             id="modeEditBtn"
-            title="切り抜き・サイズ変更・回転で画像の形を整える"
+            title="切り抜き・サイズ変更・回転・透過を調整する"
             class="mode-button"
             type="button"
             aria-pressed="false"
@@ -493,6 +493,39 @@
               <button id="flipXBtn" class="button button-quiet" type="button">左右反転</button>
               <button id="flipYBtn" class="button button-quiet" type="button">上下反転</button>
             </div>
+          </section>
+
+          <section class="settings-section transparency-settings" aria-labelledby="editTransparencyHeading">
+            <h3 id="editTransparencyHeading">透過</h3>
+            <p class="field-help">白背景などの指定色を透明にしたり、画像全体を半透明にできます。元画像は変更しません。</p>
+            <label class="checkbox-row" for="editTransparencyEnabled">
+              <input id="editTransparencyEnabled" type="checkbox">
+              <span>指定した色を透明にする</span>
+            </label>
+            <div class="field">
+              <label for="editTransparencyColor">透明にする色</label>
+              <input id="editTransparencyColor" type="color" value="#ffffff" disabled title="透明にしたい背景色などを指定します">
+            </div>
+            <button id="pickTransparencyColorBtn" class="button button-secondary" type="button" aria-pressed="false" aria-describedby="transparencyPickHint" title="画像をクリック／タップして色を指定します">画像から色を選ぶ</button>
+            <p id="transparencyPickHint" class="field-help" role="status">同じ色は背景以外の部分も透明になります。色が残る場合は許容範囲を少しずつ上げてください。</p>
+            <div class="field">
+              <div class="label-row">
+                <label for="editTransparencyTolerance">色の許容範囲</label>
+                <output id="editTransparencyToleranceValue" for="editTransparencyTolerance">10%</output>
+              </div>
+              <input id="editTransparencyTolerance" type="range" min="0" max="100" step="1" value="10" disabled aria-describedby="editTransparencyToleranceHelp">
+              <p id="editTransparencyToleranceHelp" class="field-help">0%は完全に同じ色だけ、100%はすべての色を透明にします。人物や物を自動で切り抜く機能ではありません。</p>
+            </div>
+            <div class="field">
+              <div class="label-row">
+                <label for="editOpacity">画像全体の不透明度</label>
+                <output id="editOpacityValue" for="editOpacity">100%</output>
+              </div>
+              <input id="editOpacity" type="range" min="0" max="100" step="1" value="100" aria-describedby="editOpacityHelp">
+              <p id="editOpacityHelp" class="field-help">100%は元の濃さ、0%は完全に透明です。透明部分は市松模様で表示します。</p>
+            </div>
+            <button id="resetTransparencyBtn" class="button button-quiet" type="button">透過設定だけをリセット</button>
+            <p class="field-help">透明を残して保存するにはPNG・WebPを選んでください。JPEGでは白背景になります。透過設定は画像結合・画像分割・画像加工にも反映されます。</p>
           </section>
 
           <section class="settings-section accent-section" aria-labelledby="bulkHeading">
@@ -1131,7 +1164,16 @@
 
       <div class="app-dialog__body update-card-list">
         <article class="update-card">
-          <div class="update-card__meta"><time datetime="2026-09-19">2026.09.19</time><span>最新</span></div>
+          <div class="update-card__meta"><time datetime="2026-09-25">2026.09.25</time><span>最新</span></div>
+          <h3>画像編集に透過機能を追加</h3>
+          <ul>
+            <li>指定色の透明化、画像からの色選択、色の許容範囲、画像全体の不透明度を調整できます。</li>
+            <li>透過設定は元に戻す・やり直す、設定プリセット、作業ファイルの保存・再開に対応しています。</li>
+            <li>PNG・WebPは透明を保持し、JPEGは白背景で保存します。</li>
+          </ul>
+        </article>
+        <article class="update-card">
+          <div class="update-card__meta"><time datetime="2026-09-19">2026.09.19</time></div>
           <h3>取り消し・作業保存・まとめて処理を追加</h3>
           <ul><li>画像の加工や素材削除を段階的に取り消せるようにしました。</li><li>素材と配置を含む作業ファイルの保存・再開に対応しました。</li><li>チェックした画像への加工・保存とZIP保存を追加しました。</li><li>スマホの確認用プレビュー、読みやすい表示、モードの案内を追加しました。</li></ul>
         </article>

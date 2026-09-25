@@ -3578,3 +3578,32 @@ input[type="range"] {
     forced-color-adjust: none;
   }
 }
+.transparency-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.transparency-settings > :is(p, .field, .checkbox-row) {
+  margin: 0;
+}
+
+.transparency-settings input[type="color"] {
+  width: 100%;
+  min-height: 44px;
+}
+
+.edit-viewport.is-picking-transparency,
+.edit-viewport.is-picking-transparency *,
+.mobile-preview canvas.is-picking-transparency {
+  cursor: crosshair;
+}
+
+.edit-viewport.is-picking-transparency .crop-overlay {
+  pointer-events: none;
+}
+
+.mobile-preview canvas {
+  background-image: conic-gradient(#dfe3eb 25%, #f4f5f8 0 50%, #dfe3eb 0 75%, #f4f5f8 0);
+  background-size: 16px 16px;
+}

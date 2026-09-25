@@ -51,6 +51,7 @@
     pendingProject: null,
     draggedId: null,
     cropGesture: null,
+    transparencyPickingId: null,
     previewFrame: 0,
     loadGeneration: 0,
     loadQueue: Promise.resolve(),
@@ -116,6 +117,9 @@
     "confirmProjectOpenBtn", "cancelProjectOpenBtn", "projectStatus",
     "mobilePreview", "mobilePreviewCanvas", "mobilePreviewLabel", "mobilePreviewToggle",
     "readableUiBtn", "modePurpose", "importReport", "importReportList", "filterFinishPlacementHelp",
+    "editTransparencyEnabled", "editTransparencyColor", "editTransparencyTolerance",
+    "editTransparencyToleranceValue", "editOpacity", "editOpacityValue",
+    "pickTransparencyColorBtn", "resetTransparencyBtn", "transparencyPickHint",
     "modeCombineBtn",
     "modeEditBtn",
     "modeCanvasBtn",
@@ -684,6 +688,27 @@
     el.flipXBtn?.addEventListener("click", () => toggleSelectedFlip("flipX"));
     el.flipYBtn?.addEventListener("click", () => toggleSelectedFlip("flipY"));
 
+    el.editTransparencyEnabled?.addEventListener("change", updateTransparencyFromControls);
+    [el.editTransparencyColor, el.editTransparencyTolerance, el.editOpacity].filter(Boolean)
+      .forEach((control) => control.addEventListener("input", updateTransparencyFromControls));
+    el.pickTransparencyColorBtn?.addEventListener("click", () => {
+      const record = getSelected();
+      if (!record || state.exporting) return;
+      state.transparencyPickingId = state.transparencyPickingId ? null : record.id;
+      syncTransparencyControls();
+    });
+    el.editViewport?.addEventListener("pointerdown", pickTransparencyColor, true);
+    el.mobilePreviewCanvas?.addEventListener("pointerdown", pickTransparencyColor);
+    el.resetTransparencyBtn?.addEventListener("click", () => {
+      const record = getSelected();
+      if (!record || state.exporting) return;
+      record.transparency = sanitizeTransparencyState();
+      state.transparencyPickingId = null;
+      syncTransparencyControls();
+      updateConditionalControls();
+      schedulePreview();
+    });
+
     el.applyCropAllBtn?.addEventListener("click", applySelectedCropToAll);
     el.applyResizeAllBtn?.addEventListener("click", applySelectedResizeToAll);
     el.presetSquareAllBtn?.addEventListener("click", () => applyCenteredRatioToAll("1:1"));
@@ -1167,6 +1192,7 @@
           rotation: 0,
           flipX: false,
           flipY: false,
+          transparency: sanitizeTransparencyState(),
           filter: createDefaultFilterState(),
           finishLayers: [],
         });
@@ -1629,6 +1655,7 @@
   }
 
   function setMode(mode) {
+    state.transparencyPickingId = null;
     if (state.mode === "canvas" && mode !== "canvas") cancelCanvasGesture();
     if (state.mode === "filter" && mode !== "filter") {
       cancelFinishGesture();
@@ -1744,6 +1771,7 @@
         rotation: normalizeRotation(numberValue(source.rotation, 0)),
         flipX: source.flipX === true,
         flipY: source.flipY === true,
+        transparency: sanitizeTransparencyState(source.transparency),
         cropRatio: cropRatios.has(source.cropRatio) ? source.cropRatio : "free",
         crop: {
           centerXRatio: clamp(numberValue(cropSource.centerXRatio, 0.5), 0, 1),
@@ -1886,6 +1914,7 @@
         rotation: record.rotation,
         flipX: record.flipX,
         flipY: record.flipY,
+        transparency: record.transparency,
         cropRatio: record.cropRatio,
         crop: {
           centerXRatio: (crop.x + crop.width / 2) / bounds.width,
@@ -1955,6 +1984,7 @@
       record.rotation = settings.rotation;
       record.flipX = settings.flipX;
       record.flipY = settings.flipY;
+      record.transparency = sanitizeTransparencyState(settings.transparency);
       record.cropRatio = settings.cropRatio;
       const bounds = getOrientedDimensions(record);
       const width = clamp(settings.crop.widthRatio * bounds.width, MIN_CROP_SIZE, bounds.width);
@@ -2803,6 +2833,7 @@
   }
 
   function selectImage(id) {
+    state.transparencyPickingId = null;
     state.selectedId = id;
     normalizeFinishSelection();
     renderImageList();
@@ -2948,6 +2979,7 @@
   }
 
   function updateActionAvailability() {
+    syncTransparencyControls();
     recordImageHistory();
     const hasImages = state.images.length > 0;
     const hasPendingLoads = state.queuedLoadCount > 0 || state.pendingLoads.size > 0;
@@ -3177,6 +3209,7 @@
         (state.mode === "canvas" && canvasBackground === "transparent" && format !== "png")
         || (state.mode === "filter" && format === "jpeg")
         || (state.mode === "split" && format === "jpeg")
+        || (state.mode === "edit" && format === "jpeg")
       ),
     );
   }
@@ -3566,7 +3599,7 @@
     return { x, y, width, height };
   }
 
-  function drawRecordInto(context, record, dx, dy, dw, dh) {
+  function drawRecordGeometryInto(context, record, dx, dy, dw, dh) {
     const crop = normalizedCrop(record);
     const oriented = getOrientedDimensions(record);
     context.save();
@@ -3586,6 +3619,168 @@
     context.restore();
   }
 
+  function sanitizeTransparencyState(value) {
+    const source = value && typeof value === "object" ? value : {};
+    return {
+      enabled: source.enabled === true,
+      color: sanitizeHexColor(source.color, "#ffffff"),
+      tolerance: Math.round(clamp(numberValue(source.tolerance, 10), 0, 100)),
+      opacity: Math.round(clamp(numberValue(source.opacity, 100), 0, 100)),
+    };
+  }
+
+  function applyTransparencyToPixels(imageData, value) {
+    const settings = sanitizeTransparencyState(value);
+    const color = settings.color.slice(1);
+    const red = parseInt(color.slice(0, 2), 16);
+    const green = parseInt(color.slice(2, 4), 16);
+    const blue = parseInt(color.slice(4, 6), 16);
+    const thresholdSquared = 3 * (255 * settings.tolerance / 100) ** 2;
+    const opacity = settings.opacity / 100;
+    const data = imageData.data;
+    for (let index = 0; index < data.length; index += 4) {
+      const distanceSquared = (data[index] - red) ** 2 + (data[index + 1] - green) ** 2 + (data[index + 2] - blue) ** 2;
+      data[index + 3] = settings.enabled && distanceSquared <= thresholdSquared
+        ? 0 : Math.round(data[index + 3] * opacity);
+    }
+    return imageData;
+  }
+
+  function drawRecordInto(context, record, dx, dy, dw, dh) {
+    const settings = sanitizeTransparencyState(record.transparency);
+    if (settings.opacity === 0) return;
+    if (!settings.enabled) {
+      context.save();
+      try {
+        context.globalAlpha *= settings.opacity / 100;
+        drawRecordGeometryInto(context, record, dx, dy, dw, dh);
+      } finally {
+        context.restore();
+      }
+      return;
+    }
+    // Work on a bounded, isolated tile so keying cannot erase the backdrop or
+    // other images, and a large export does not require another full-size canvas.
+    const transform = context.getTransform?.() || { a: 1, b: 0, c: 0, d: 1 };
+    const width = Math.max(1, Math.ceil(dw * Math.hypot(transform.a, transform.b)));
+    const height = Math.max(1, Math.ceil(dh * Math.hypot(transform.c, transform.d)));
+    const tile = document.createElement("canvas");
+    const neutralGeometry = isRecordGeometryNeutral(record);
+    try {
+      for (let top = 0; top < height; top += 512) {
+        for (let left = 0; left < width; left += 512) {
+          tile.width = Math.min(512, width - left);
+          tile.height = Math.min(512, height - top);
+          const tileContext = requireCanvasContext(tile, { willReadFrequently: true });
+          tileContext.clearRect(0, 0, tile.width, tile.height);
+          tileContext.imageSmoothingEnabled = true;
+          tileContext.imageSmoothingQuality = "high";
+          if (neutralGeometry) {
+            tileContext.drawImage(record.image, 0, 0, record.originalWidth, record.originalHeight, -left, -top, width, height);
+          } else {
+            drawRecordGeometryInto(tileContext, record, -left, -top, width, height);
+          }
+          const pixels = tileContext.getImageData(0, 0, tile.width, tile.height);
+          tileContext.putImageData(applyTransparencyToPixels(pixels, settings), 0, 0);
+          context.drawImage(tile, dx + left * dw / width, dy + top * dh / height, tile.width * dw / width, tile.height * dh / height);
+        }
+      }
+    } finally {
+      tile.width = 1;
+      tile.height = 1;
+    }
+  }
+
+  function syncTransparencyControls() {
+    const record = getSelected();
+    const settings = sanitizeTransparencyState(record?.transparency);
+    const unavailable = !record || state.exporting;
+    if (unavailable || state.mode !== "edit" || state.transparencyPickingId !== record?.id) state.transparencyPickingId = null;
+    const picking = Boolean(state.transparencyPickingId);
+    [el.editTransparencyEnabled, el.editOpacity, el.pickTransparencyColorBtn, el.resetTransparencyBtn]
+      .filter(Boolean).forEach((control) => { control.disabled = unavailable; });
+    [el.editTransparencyColor, el.editTransparencyTolerance].filter(Boolean)
+      .forEach((control) => { control.disabled = unavailable || !settings.enabled; });
+    if (el.editTransparencyEnabled) el.editTransparencyEnabled.checked = settings.enabled;
+    if (el.editTransparencyColor) el.editTransparencyColor.value = settings.color;
+    if (el.editTransparencyTolerance) el.editTransparencyTolerance.value = String(settings.tolerance);
+    if (el.editTransparencyToleranceValue) el.editTransparencyToleranceValue.textContent = `${settings.tolerance}%`;
+    if (el.editOpacity) el.editOpacity.value = String(settings.opacity);
+    if (el.editOpacityValue) el.editOpacityValue.textContent = `${settings.opacity}%`;
+    el.pickTransparencyColorBtn?.setAttribute("aria-pressed", String(picking));
+    if (el.pickTransparencyColorBtn) el.pickTransparencyColorBtn.textContent = picking ? "色の選択をキャンセル" : "画像から色を選ぶ";
+    if (el.transparencyPickHint) el.transparencyPickHint.textContent = picking
+      ? "プレビューの画像で透明にしたい色をクリック／タップしてください。スマホでは小型プレビューも使えます。Escでキャンセルできます。"
+      : "同じ色は背景以外の部分も透明になります。色が残る場合は許容範囲を少しずつ上げてください。";
+    el.editViewport?.classList.toggle("is-picking-transparency", picking);
+    el.mobilePreviewCanvas?.classList.toggle("is-picking-transparency", picking);
+  }
+
+  function updateTransparencyFromControls() {
+    const record = getSelected();
+    if (!record || state.exporting) return;
+    record.transparency = sanitizeTransparencyState({
+      enabled: el.editTransparencyEnabled.checked,
+      color: el.editTransparencyColor.value,
+      tolerance: el.editTransparencyTolerance.value,
+      opacity: el.editOpacity.value,
+    });
+    syncTransparencyControls();
+    updateConditionalControls();
+    schedulePreview();
+  }
+
+  function transparencySamplePoint(record, ratioX, ratioY) {
+    const oriented = getOrientedDimensions(record);
+    let x = Math.floor(clamp(ratioX, 0, 1) * oriented.width);
+    let y = Math.floor(clamp(ratioY, 0, 1) * oriented.height);
+    x = Math.min(oriented.width - 1, x);
+    y = Math.min(oriented.height - 1, y);
+    if (record.flipX) x = oriented.width - 1 - x;
+    if (record.flipY) y = oriented.height - 1 - y;
+    const rotation = normalizeRotation(record.rotation);
+    if (rotation === 90) return { x: y, y: record.originalHeight - 1 - x };
+    if (rotation === 180) return { x: record.originalWidth - 1 - x, y: record.originalHeight - 1 - y };
+    if (rotation === 270) return { x: record.originalWidth - 1 - y, y: x };
+    return { x, y };
+  }
+
+  function pickTransparencyColor(event) {
+    const record = getSelected();
+    if (!record || state.exporting || state.mode !== "edit" || state.transparencyPickingId !== record.id || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const isMobilePreview = event.currentTarget === el.mobilePreviewCanvas;
+    const rect = (isMobilePreview ? el.mobilePreviewCanvas : el.editCanvas).getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientY < rect.top || event.clientX >= rect.left + rect.width || event.clientY >= rect.top + rect.height) return;
+    const oriented = getOrientedDimensions(record);
+    const region = isMobilePreview ? normalizedCrop(record) : { x: 0, y: 0, ...oriented };
+    const point = transparencySamplePoint(record,
+      (region.x + (event.clientX - rect.left) / rect.width * region.width) / oriented.width,
+      (region.y + (event.clientY - rect.top) / rect.height * region.height) / oriented.height);
+    const sample = document.createElement("canvas");
+    try {
+      sample.width = sample.height = 1;
+      const context = requireCanvasContext(sample, { willReadFrequently: true });
+      context.drawImage(record.image, point.x, point.y, 1, 1, 0, 0, 1, 1);
+      const pixel = context.getImageData(0, 0, 1, 1).data;
+      if (!pixel[3]) {
+        setStatus("ここは元から透明です。色のある部分を選んでください。", "warning");
+        return;
+      }
+      const color = `#${Array.from(pixel.slice(0, 3), (value) => value.toString(16).padStart(2, "0")).join("")}`;
+      record.transparency = { ...sanitizeTransparencyState(record.transparency), enabled: true, color };
+      state.transparencyPickingId = null;
+      syncTransparencyControls();
+      schedulePreview();
+      setStatus(`${color}を透明にする色に設定しました。`, "success");
+    } catch (error) {
+      setStatus("色を読み取れませんでした。カラーピッカーから色を指定してください。", "error");
+    } finally {
+      sample.width = sample.height = 1;
+    }
+  }
+
   function isRecordGeometryNeutral(record) {
     if (!record || normalizeRotation(record.rotation) !== 0 || record.flipX || record.flipY) return false;
     const crop = normalizedCrop(record);
@@ -3601,7 +3796,8 @@
   }
 
   function drawProcessedRecordInto(context, record, dx, dy, dw, dh) {
-    if (isRecordGeometryNeutral(record)) {
+    const transparency = sanitizeTransparencyState(record.transparency);
+    if (isRecordGeometryNeutral(record) && !transparency.enabled && transparency.opacity === 100) {
       context.drawImage(record.image, 0, 0, record.originalWidth, record.originalHeight, dx, dy, dw, dh);
       return;
     }
@@ -3643,13 +3839,9 @@
     const context = canvas.getContext("2d", { alpha: true });
     context.setTransform((cssWidth * dpr) / oriented.width, 0, 0, (cssHeight * dpr) / oriented.height, 0, 0);
     context.clearRect(0, 0, oriented.width, oriented.height);
-    context.translate(oriented.width / 2, oriented.height / 2);
-    context.scale(record.flipX ? -1 : 1, record.flipY ? -1 : 1);
-    context.translate(-oriented.width / 2, -oriented.height / 2);
-    applyOrientationTransform(context, record);
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = "high";
-    context.drawImage(record.image, 0, 0, record.originalWidth, record.originalHeight);
+    drawRecordInto(context, {
+      ...record, cropRatio: "free", crop: { x: 0, y: 0, width: oriented.width, height: oriented.height },
+    }, 0, 0, oriented.width, oriented.height);
 
     const crop = record.crop;
     const renderedWidth = Math.max(1, canvas.clientWidth || cssWidth);
@@ -3671,6 +3863,7 @@
   }
 
   function syncEditControls() {
+    syncTransparencyControls();
     const record = getSelected();
     const controls = [
       el.cropRatio,
@@ -6325,6 +6518,8 @@
   }
 
   function resetRecord(record) {
+    record.transparency = sanitizeTransparencyState();
+    state.transparencyPickingId = null;
     record.rotation = 0;
     record.flipX = false;
     record.flipY = false;
@@ -6906,6 +7101,7 @@
       ...record,
       crop: { ...normalizedCrop(record) },
       resize: { ...record.resize },
+      transparency: sanitizeTransparencyState(record.transparency),
     };
   }
 
@@ -7203,7 +7399,7 @@
       const finishLayers = [];
       for (const layer of record.finishLayers) finishLayers.push(await packLayer(layer));
       packedImages.push({
-        ...pickProjectProperties(record, ["id", "fileName", "crop", "cropRatio", "resize", "resizeAnchor", "rotation", "flipX", "flipY", "filter"]),
+        ...pickProjectProperties(record, ["id", "fileName", "crop", "cropRatio", "resize", "resizeAnchor", "rotation", "flipX", "flipY", "transparency", "filter"]),
         asset: await sourceId(record), finishLayers,
       });
     }
@@ -7334,6 +7530,7 @@
         ...source, id: saved.id, fileName: String(saved.fileName || source.fileName).slice(0, 200),
         originalWidth: source.naturalWidth, originalHeight: source.naturalHeight,
         rotation: normalizeRotation(saved.rotation), flipX: saved.flipX === true, flipY: saved.flipY === true,
+        transparency: sanitizeTransparencyState(saved.transparency),
         cropRatio: ["free", "1:1", "4:3", "3:4", "16:9", "9:16"].includes(saved.cropRatio) ? saved.cropRatio : "free",
         resize: { width: nullablePresetDimension(saved.resize?.width), height: nullablePresetDimension(saved.resize?.height), keepAspect: saved.resize?.keepAspect !== false },
         resizeAnchor: saved.resizeAnchor === "height" ? "height" : "width", filter: sanitizeFilterState(saved.filter),
@@ -7620,6 +7817,12 @@
     el.undoRemovalBtn?.addEventListener("click", () => travelImageHistory("undo"));
     document.addEventListener("focusout", () => { state.imageHistory.group = null; });
     document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && state.transparencyPickingId) {
+        state.transparencyPickingId = null;
+        syncTransparencyControls();
+        event.preventDefault();
+        return;
+      }
       if (state.mode === "canvas" || event.defaultPrevented || document.querySelector?.("dialog[open]")) return;
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z") return;
       if (event.target?.matches?.('input, textarea, [contenteditable="true"]')) return;
@@ -7656,7 +7859,7 @@
   const MODE_PURPOSES = {
     combine: "複数画像を縦・横・格子状に並べて、1枚にまとめます。",
     split: "選択中の1枚を、列数×行数に分けて保存します。",
-    edit: "切り抜き・サイズ変更・回転で、画像の形を整えます。",
+    edit: "切り抜き・サイズ変更・回転・透過で、画像を整えます。",
     canvas: "画像をレイヤーとして自由に配置し、重ね合わせます。",
     filter: "色や質感を調整し、額縁などの仕上げ素材を重ねます。",
   };
@@ -7764,6 +7967,8 @@
 
   // Pure helpers are exposed only to make the local build easy to verify.
   globalThis.__IMAGE_TOOL_TEST__ = {
+    sanitizeTransparencyState, applyTransparencyToPixels, transparencySamplePoint,
+    drawRecordInto, drawProcessedRecordInto, syncTransparencyControls, updateTransparencyFromControls, pickTransparencyColor,
     snapshotImageWorkspace, recordImageHistory, travelImageHistory, sweepImageSourceUrls, collectWorkspaceUrls,
     applyMarkedBatch, exportMarkedImages, createImageZip, zipCrc32,
     createProjectDocument, validateProjectDocument, unpackProject, decodeProjectAssets,

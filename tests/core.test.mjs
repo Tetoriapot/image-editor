@@ -5979,6 +5979,172 @@ test("project preparation rejects corrupt JSON without touching current material
   assert.match(elements.projectStatus.textContent, /読み取れません/);
 });
 
+test("transparency defaults are neutral and untrusted settings are sanitized independently", () => {
+  const api = loadPureApi();
+  const defaults = { enabled: false, color: "#ffffff", tolerance: 10, opacity: 100 };
+  assert.deepEqual(plain(api.sanitizeTransparencyState()), defaults);
+  assert.deepEqual(plain(api.sanitizeTransparencyState({ enabled: "true", color: "url(secret)", tolerance: -2, opacity: 110 })), { ...defaults, tolerance: 0 });
+  const source = { enabled: true, color: "#123456", tolerance: 102, opacity: -1 };
+  const safe = api.sanitizeTransparencyState(source);
+  assert.deepEqual(plain(safe), { enabled: true, color: "#123456", tolerance: 100, opacity: 0 });
+  safe.color = "#abcdef";
+  assert.equal(source.color, "#123456");
+});
+
+test("color transparency removes only matching colors, preserves RGB and multiplies existing alpha", () => {
+  const api = loadPureApi();
+  const original = [255,255,255,255, 250,250,250,128, 0,0,0,255, 50,100,200,0];
+  const exact = filterImageData(4, 1, original);
+  api.applyTransparencyToPixels(exact, { enabled: true, color: "#ffffff", tolerance: 0, opacity: 50 });
+  assert.deepEqual(Array.from(exact.data), [255,255,255,0, 250,250,250,64, 0,0,0,128, 50,100,200,0]);
+  const near = filterImageData(4, 1, original);
+  api.applyTransparencyToPixels(near, { enabled: true, color: "#ffffff", tolerance: 2 });
+  assert.deepEqual([near.data[3],near.data[7],near.data[11]], [0,0,255]);
+  const disabled = filterImageData(4, 1, original);
+  api.applyTransparencyToPixels(disabled, { enabled: false, opacity: 100 });
+  assert.deepEqual(Array.from(disabled.data), original);
+  for (const settings of [{ enabled: true, tolerance: 100 }, { opacity: 0 }]) {
+    const all = filterImageData(4, 1, original);
+    api.applyTransparencyToPixels(all, settings);
+    assert.ok(Array.from(all.data).filter((_, index) => index % 4 === 3).every((alpha) => alpha === 0));
+  }
+});
+
+test("transparency sample coordinates invert all rotations and flips exactly", () => {
+  const api = loadPureApi();
+  for (const rotation of [0,90,180,270]) for (const flipX of [false,true]) for (const flipY of [false,true]) {
+    const item = stateRecord("sample", 8, 6, { rotation, flipX, flipY });
+    for (const [sx,sy] of [[0,0],[3,2],[7,5]]) {
+      let x = sx, y = sy;
+      const width = rotation % 180 ? 6 : 8, height = rotation % 180 ? 8 : 6;
+      if (rotation === 90) { x = 5 - sy; y = sx; }
+      if (rotation === 180) { x = 7 - sx; y = 5 - sy; }
+      if (rotation === 270) { x = sy; y = 7 - sx; }
+      if (flipX) x = width - 1 - x;
+      if (flipY) y = height - 1 - y;
+      assert.deepEqual(plain(api.transparencySamplePoint(item, (x + .5) / width, (y + .5) / height)), { x: sx, y: sy });
+    }
+  }
+});
+
+test("transparency controls apply to only the selected image, undo, redo and reset safely", () => {
+  const { api, elements } = loadActionApi();
+  const item = stateRecord("keyed", 20, 10), other = stateRecord("untouched", 20, 10);
+  api.state.mode = "edit"; api.state.images = [item,other]; api.state.selectedId = item.id;
+  api.state.imageHistory.current = api.snapshotImageWorkspace();
+  api.syncTransparencyControls();
+  assert.equal(elements.editTransparencyColor.disabled, true);
+  elements.editTransparencyEnabled.checked = true;
+  elements.editTransparencyColor.value = "#ff0000";
+  elements.editTransparencyTolerance.value = "12";
+  elements.editOpacity.value = "60";
+  api.updateTransparencyFromControls();
+  const expected = { enabled:true, color:"#ff0000", tolerance:12, opacity:60 };
+  assert.deepEqual(plain(item.transparency), expected);
+  assert.equal(other.transparency, undefined);
+  assert.equal(elements.editTransparencyColor.disabled, false);
+  assert.equal(api.state.imageHistory.past.length, 1);
+  api.travelImageHistory("undo");
+  assert.equal(api.state.images[0].transparency.enabled, false);
+  api.travelImageHistory("redo");
+  assert.deepEqual(plain(api.state.images[0].transparency), expected);
+  const snapshot = api.snapshotRecord(api.state.images[0]);
+  api.resetRecord(api.state.images[0]);
+  assert.deepEqual(plain(snapshot.transparency), expected);
+  api.state.exporting = true;
+  api.syncTransparencyControls();
+  assert.equal(elements.editOpacity.disabled, true);
+  assert.equal(elements.pickTransparencyColorBtn.disabled, true);
+});
+
+test("transparency edit presets persist settings and older presets restore neutral transparency", () => {
+  const { api } = loadActionApi();
+  const item = stateRecord("preset-key", 20, 10, { transparency:{ enabled:true, color:"#00ff00", tolerance:20, opacity:75 } });
+  api.state.mode = "edit"; api.state.images = [item]; api.state.selectedId = item.id;
+  const preset = api.captureCurrentProcessingSettings("edit");
+  api.resetRecord(item);
+  api.applyProcessingPresetSettings("edit", preset);
+  assert.deepEqual(plain(item.transparency), plain(preset.transparency));
+  delete preset.transparency;
+  api.applyProcessingPresetSettings("edit", preset);
+  assert.deepEqual(plain(item.transparency), plain(api.sanitizeTransparencyState()));
+});
+
+test("project roundtrip retains transparency and legacy projects load neutral settings", async () => {
+  const { api } = loadActionApi();
+  const file = new File([new Uint8Array([1,2,3])], "key.png", { type:"image/png" });
+  const item = stateRecord("project-key", 20, 10, { file, finishLayers:[], transparency:{ enabled:true, color:"#eeeeee", tolerance:7, opacity:80 } });
+  api.state.images = [item]; api.state.selectedId = item.id;
+  const project = await api.createProjectDocument();
+  const sources = new Map([[project.images[0].asset, { file, objectUrl:"blob:restored-key", naturalWidth:20, naturalHeight:10, image:{} }]]);
+  assert.deepEqual(plain(api.unpackProject(project,sources).images[0].transparency), plain(item.transparency));
+  delete project.images[0].transparency;
+  assert.deepEqual(plain(api.unpackProject(project,sources).images[0].transparency), plain(api.sanitizeTransparencyState()));
+});
+
+test("tiled transparency preserves neighboring colors and a composited background across 512 boundaries", () => {
+  const harness = createTiledFilterHarness();
+  const { api } = loadActionApi({ createElement:harness.createElement });
+  const width = 1025, height = 2, pixels = new Uint8ClampedArray(width * height * 4);
+  for (let index = 0; index < width * height; index++) pixels.set(index % 2 ? [10,20,30,128] : [255,255,255,255], index * 4);
+  const image = { pixels, width, height, naturalWidth:width, naturalHeight:height };
+  const item = stateRecord("tiled-key", width, height, { image, transparency:{ enabled:true, color:"#ffffff", tolerance:0, opacity:100 } });
+  const output = harness.makeCanvas("output"); output.width = width; output.height = height;
+  api.drawProcessedRecordInto(output.context,item,0,0,width,height);
+  for (let index = 0; index < width * height; index++) {
+    assert.equal(output.pixelData[index * 4 + 3], index % 2 ? 128 : 0, `pixel ${index}`);
+  }
+  assert.equal(pixels[3],255,"original source stays untouched");
+  output.context.fillStyle = "#ffffff";
+  output.context.fillRect(0,0,width,height);
+  api.drawProcessedRecordInto(output.context,item,0,0,width,height);
+  assert.deepEqual(Array.from(output.pixelData.slice(0,4)), [255,255,255,255], "transparent key must not erase the white destination");
+  assert.ok(harness.writes.every((write) => write.dirtyWidth <= 512 && write.dirtyHeight <= 512));
+  assert.ok(harness.canvases.filter((canvas) => canvas !== output).every((canvas) => canvas.width === 1 && canvas.height === 1));
+});
+
+test("transparency and finish composition preserve alpha for PNG/WebP and flatten JPEG", () => {
+  for (const format of ["png","webp","jpeg"]) {
+    const harness = createTiledFilterHarness();
+    const { api } = loadActionApi({ createElement:harness.createElement });
+    const image = { width:2, height:2, pixels:new Uint8ClampedArray([255,255,255,255, 40,80,120,255, 255,255,255,255, 40,80,120,128]) };
+    const item = stateRecord("key-filter",2,2,{ image, transparency:{enabled:true,color:"#ffffff",tolerance:0,opacity:50}, filter:api.createDefaultFilterState(), finishLayers:[] });
+    const canvas = api.renderFilteredRecordToCanvas(item,format);
+    assert.equal(canvas.pixelData[3], format === "jpeg" ? 255 : 0);
+    assert.equal(canvas.pixelData[7], format === "jpeg" ? 255 : 128);
+    assert.equal(canvas.pixelData[15], format === "jpeg" ? 255 : 64);
+  }
+});
+
+test("transparency color picking uses original pixels and cancels when selection or mode changes", () => {
+  const harness = createTiledFilterHarness();
+  const { api, elements } = loadActionApi({createElement:harness.createElement});
+  const item = stateRecord("pick",2,2,{image:{width:2,height:2,pixels:new Uint8ClampedArray([255,0,0,255, 0,255,0,255, 0,0,255,255, 0,0,0,0])}});
+  api.state.images=[item]; api.state.selectedId=item.id; api.state.mode="edit";
+  elements.editCanvas.getBoundingClientRect = () => ({left:10,top:20,width:100,height:100});
+  api.state.transparencyPickingId=item.id;
+  api.pickTransparencyColor({button:0,clientX:85,clientY:95,preventDefault(){},stopPropagation(){}});
+  assert.equal(api.state.transparencyPickingId,item.id,"transparent source pixel does not consume selection");
+  api.pickTransparencyColor({button:0,clientX:35,clientY:45,preventDefault(){},stopPropagation(){}});
+  assert.equal(item.transparency.color,"#ff0000");
+  assert.equal(item.transparency.enabled,true);
+  assert.equal(api.state.transparencyPickingId,null);
+  api.state.transparencyPickingId=item.id; api.state.mode="combine"; api.syncTransparencyControls();
+  assert.equal(api.state.transparencyPickingId,null);
+});
+
+test("mobile transparency picker maps the cropped preview back to original pixels", () => {
+  const harness = createTiledFilterHarness();
+  const { api, elements } = loadActionApi({createElement:harness.createElement});
+  const pixels = new Uint8ClampedArray(4 * 2 * 4);
+  for (let index=0; index<8; index++) pixels.set(index % 4 < 2 ? [255,0,0,255] : [0,255,0,255],index*4);
+  const item = stateRecord("mobile-pick",4,2,{image:{width:4,height:2,pixels},crop:{x:2,y:0,width:2,height:2}});
+  api.state.images=[item]; api.state.selectedId=item.id; api.state.mode="edit"; api.state.transparencyPickingId=item.id;
+  elements.mobilePreviewCanvas.getBoundingClientRect=()=>({left:0,top:0,width:100,height:100});
+  api.pickTransparencyColor({currentTarget:elements.mobilePreviewCanvas,button:0,clientX:25,clientY:25,preventDefault(){},stopPropagation(){}});
+  assert.equal(item.transparency.color,"#00ff00","left of cropped thumbnail is on right of original image");
+});
+
 test("product sources allow only the declared TeToriapot contact URL and no external requests", () => {
   const files = [APP_PATH, INDEX_PATH, STYLE_PATH];
   const allowedContact = "https://tetoriapot.sakura.ne.jp/index.html";
