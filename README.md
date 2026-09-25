@@ -59,6 +59,8 @@ node tests/create-fixtures.mjs
 
 GitHub Pagesは `main` ブランチのルートを公開します。アプリ本体は `index.html`・`style.css`・`app.js` の3ファイルです。
 
+アプリを更新して公開する際は、`index.html` のCSS・JavaScript参照に付けた `?v=` の更新識別子も変更してください。古いキャッシュとの混在を防ぎます。
+
 ## お問い合わせ
 
 [TeToriapot](https://tetoriapot.sakura.ne.jp/index.html)

@@ -5219,8 +5219,9 @@ test("HTML contains every app.js control contract and local-only asset reference
   assert.deepEqual(requiredIds.filter((id) => !htmlIds.has(id)), []);
   assert.match(html, /<html\s+lang="ja"/i);
   assert.match(html, /<meta\s+charset="utf-8"/i);
-  assert.match(html, /<script\s+src="app\.js"\s+defer><\/script>/i);
-  assert.match(html, /<link\s+rel="stylesheet"\s+href="style\.css">/i);
+  assert.match(html, /<script\s+src="app\.js\?v=[\w-]+"\s+defer><\/script>/i);
+  assert.match(html, /<link\s+rel="stylesheet"\s+href="style\.css\?v=[\w-]+">/i);
+  assert.equal(html.match(/app\.js\?v=([\w-]+)/)[1], html.match(/style\.css\?v=([\w-]+)/)[1], "script and stylesheet release identifiers must agree");
   assert.match(html, /id="fileInput"[^>]+accept="[^"]*image\/png[^"]*image\/jpeg[^"]*image\/webp/i);
   assert.match(html, /id="fileInput"[^>]+multiple/i);
   assert.match(html, /id="canvasFileInput"[^>]+accept="[^"]*image\/png[^"]*image\/jpeg[^"]*image\/webp/i);
