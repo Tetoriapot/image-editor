@@ -2328,6 +2328,10 @@ input[type="number"] {
   font-size: 11px;
 }
 
+.accent-section .button-stack + .field-help {
+  margin-top: 12px !important;
+}
+
 .bulk-presets {
   display: grid;
   gap: 2px;

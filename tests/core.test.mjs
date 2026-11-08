@@ -6058,6 +6058,123 @@ test("transparency controls apply to only the selected image, undo, redo and res
   assert.equal(elements.pickTransparencyColorBtn.disabled, true);
 });
 
+test("all-image transparency copies only transparency, keeps independent settings and undoes in one step", () => {
+  const { api, elements, document } = loadActionApi();
+  const expected = { enabled: true, color: "#12ab34", tolerance: 18, opacity: 65 };
+  const records = [
+    stateRecord("source", 100, 80, { transparency: expected }),
+    stateRecord("target", 200, 160, { crop: { x: 10, y: 20, width: 60, height: 70 }, rotation: 90, flipX: true, resize: { width: 30, height: 35, keepAspect: false }, filter: { adjustments: { brightness: 20 } }, finishLayers: [finishLayer("frame")] }),
+    stateRecord("third", 300, 200, { transparency: { enabled: false, opacity: 20 } }),
+  ];
+  api.state.mode = "edit"; api.state.images = records; api.state.selectedId = records[0].id;
+  api.state.markedImageIds.add(records[1].id);
+  records[0].filter = api.createDefaultFilterState(); records[0].finishLayers = [];
+  const withoutTransparency = (items) => plain(items.map(({ transparency, ...rest }) => rest));
+  const before = withoutTransparency(records);
+  forgetImageHistory(api);
+  document.activeElement = { id: "editOpacity", matches: () => true };
+  api.state.imageHistory.group = "editOpacity";
+  elements.applyTransparencyAllBtn.dispatchEvent({ type: "click" });
+  assert.deepEqual(withoutTransparency(records), before);
+  for (const record of records) assert.deepEqual(plain(record.transparency), expected);
+  assert.notEqual(records[0].transparency, records[1].transparency);
+  assert.notEqual(records[1].transparency, records[2].transparency);
+  assert.equal(api.state.imageHistory.past.length, 1);
+  assert.equal(api.state.imageHistory.group, null);
+  assert.equal(api.travelImageHistory("undo"), true);
+  assert.equal(api.state.images[1].transparency.enabled, false);
+  assert.equal(api.state.images[2].transparency.opacity, 20);
+  assert.equal(api.travelImageHistory("redo"), true);
+  for (const record of api.state.images) assert.deepEqual(plain(record.transparency), expected);
+  api.state.images[1].transparency.opacity = 5;
+  assert.equal(api.state.images[0].transparency.opacity, 65);
+  assert.equal(api.state.images[2].transparency.opacity, 65);
+});
+
+test("marked transparency leaves the unmarked source and other images unchanged and can clear settings", () => {
+  const { api, elements } = loadActionApi();
+  const source = stateRecord("source", 20, 10);
+  const target = stateRecord("target", 20, 10, { transparency: { enabled: true, color: "#000000", tolerance: 25, opacity: 60 } });
+  const untouched = stateRecord("untouched", 20, 10, { transparency: { opacity: 10 } });
+  api.state.mode = "edit"; api.state.images = [source, target, untouched]; api.state.selectedId = source.id;
+  api.state.markedImageIds.add(target.id);
+  source.filter = api.createDefaultFilterState(); source.finishLayers = [];
+  const before = plain([source, untouched]);
+  forgetImageHistory(api);
+  elements.applyMarkedTransparencyBtn.dispatchEvent({ type: "click" });
+  assert.deepEqual(plain(target.transparency), plain(api.sanitizeTransparencyState()));
+  assert.deepEqual(plain([source, untouched]), before);
+  assert.equal(api.state.batchTargetIds, null);
+  assert.equal(api.state.imageHistory.past.length, 1);
+  api.travelImageHistory("undo");
+  assert.equal(api.state.images[1].transparency.opacity, 60);
+  api.travelImageHistory("redo");
+  assert.equal(api.state.images[1].transparency.enabled, false);
+  assert.equal(api.state.images[1].transparency.opacity, 100);
+});
+
+test("transparency batch controls follow mode, target counts and loading state without false success", () => {
+  const { api, elements } = loadActionApi();
+  api.state.mode = "edit";
+  api.updateActionAvailability();
+  assert.equal(elements.applyTransparencyAllBtn.disabled, true);
+  assert.equal(elements.applyMarkedTransparencyBtn.disabled, true);
+  assert.equal(api.applySelectedTransparencyToAll(), false);
+  assert.equal(api.applyMarkedBatch("transparency"), false);
+  const source = stateRecord("source", 20, 10, { transparency: { opacity: 40 } });
+  const target = stateRecord("target", 20, 10);
+  api.state.images = [source]; api.state.selectedId = source.id;
+  api.state.markedImageIds.add(source.id);
+  api.updateActionAvailability();
+  assert.equal(elements.applyTransparencyAllBtn.disabled, true);
+  assert.equal(elements.applyMarkedTransparencyBtn.disabled, false);
+  assert.equal(api.applyMarkedBatch("transparency"), true);
+  api.state.images.push(target);
+  api.state.markedImageIds.clear(); api.state.markedImageIds.add(target.id);
+  api.updateActionAvailability();
+  assert.equal(elements.applyTransparencyAllBtn.disabled, false);
+  assert.equal(elements.applyMarkedTransparencyBtn.textContent, "1枚に透過設定を適用");
+  assert.equal(elements.applyMarkedTransparencyBtn.hidden, false);
+  for (const busy of ["exporting", "queuedLoadCount"]) {
+    api.state[busy] = busy === "exporting" ? true : 1;
+    api.updateActionAvailability();
+    assert.equal(elements.applyTransparencyAllBtn.disabled, true);
+    assert.equal(elements.applyMarkedTransparencyBtn.disabled, true);
+    assert.equal(api.applySelectedTransparencyToAll(), false);
+    assert.equal(api.applyMarkedBatch("transparency"), false);
+    assert.equal(target.transparency, undefined);
+    api.state[busy] = busy === "exporting" ? false : 0;
+  }
+  api.state.filter.queuedFinishLoadCount = 1;
+  assert.equal(api.applySelectedTransparencyToAll(), false);
+  api.state.filter.queuedFinishLoadCount = 0;
+  api.state.markedImageIds.clear(); api.state.markedImageIds.add("removed");
+  assert.equal(api.applyMarkedBatch("transparency"), false);
+  assert.equal(api.state.batchTargetIds, null);
+  for (const mode of ["combine", "split", "canvas", "filter"]) {
+    api.state.mode = mode; api.updateActionAvailability();
+    assert.equal(elements.applyMarkedTransparencyBtn.hidden, true);
+  }
+});
+
+test("batch transparency survives project export/import for every target and preserves legacy defaults", async () => {
+  const { api } = loadActionApi();
+  const file = new File([new Uint8Array([1, 2, 3])], "透過 素材.png", { type: "image/png" });
+  const settings = { enabled: true, color: "#eeeeee", tolerance: 4, opacity: 70 };
+  api.state.images = [
+    stateRecord("source", 20, 10, { file, finishLayers: [], transparency: settings }),
+    stateRecord("target", 20, 10, { file, finishLayers: [] }),
+    stateRecord("untouched", 20, 10, { file, finishLayers: [] }),
+  ];
+  api.state.selectedId = "source"; api.state.markedImageIds.add("target");
+  api.applyMarkedBatch("transparency");
+  const saved = api.validateProjectDocument(JSON.parse(JSON.stringify(await api.createProjectDocument())));
+  const sources = new Map(saved.assets.map((asset) => [asset.id, { file, objectUrl: `blob:${asset.id}`, naturalWidth: 20, naturalHeight: 10, image: {} }]));
+  const restored = api.unpackProject(saved, sources);
+  assert.deepEqual(plain(restored.images.map((record) => record.transparency)), [settings, settings, plain(api.sanitizeTransparencyState())]);
+  assert.notEqual(restored.images[0].transparency, restored.images[1].transparency);
+});
+
 test("transparency edit presets persist settings and older presets restore neutral transparency", () => {
   const { api } = loadActionApi();
   const item = stateRecord("preset-key", 20, 10, { transparency:{ enabled:true, color:"#00ff00", tolerance:20, opacity:75 } });

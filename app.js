@@ -111,7 +111,7 @@
     "imageSelectAll",
     "imageSelectionCount",
     "deleteSelectedImagesBtn",
-    "applyMarkedCropBtn", "applyMarkedResizeBtn", "applyMarkedFilterBtn", "exportMarkedBtn",
+    "applyMarkedCropBtn", "applyMarkedResizeBtn", "applyMarkedTransparencyBtn", "applyMarkedFilterBtn", "exportMarkedBtn",
     "batchSourceHint", "undoImagesBtn", "redoImagesBtn", "undoRemovalBtn",
     "saveProjectBtn", "openProjectBtn", "projectFileInput", "projectImportSummary",
     "confirmProjectOpenBtn", "cancelProjectOpenBtn", "projectStatus",
@@ -339,6 +339,7 @@
     "flipYBtn",
     "applyCropAllBtn",
     "applyResizeAllBtn",
+    "applyTransparencyAllBtn",
     "presetSquareAllBtn",
     "preset169AllBtn",
     "preset512AllBtn",
@@ -711,6 +712,7 @@
 
     el.applyCropAllBtn?.addEventListener("click", applySelectedCropToAll);
     el.applyResizeAllBtn?.addEventListener("click", applySelectedResizeToAll);
+    el.applyTransparencyAllBtn?.addEventListener("click", applySelectedTransparencyToAll);
     el.presetSquareAllBtn?.addEventListener("click", () => applyCenteredRatioToAll("1:1"));
     el.preset169AllBtn?.addEventListener("click", () => applyCenteredRatioToAll("16:9"));
     el.preset512AllBtn?.addEventListener("click", () => applyResizePresetToAll(512, 512));
@@ -3043,6 +3045,9 @@
       || currentModeHasNoOutput;
     if (el.applyCropAllBtn) el.applyCropAllBtn.disabled = state.images.length < 2 || state.exporting;
     if (el.applyResizeAllBtn) el.applyResizeAllBtn.disabled = state.images.length < 2 || state.exporting;
+    if (el.applyTransparencyAllBtn) {
+      el.applyTransparencyAllBtn.disabled = !getSelected() || state.images.length < 2 || state.exporting || hasFilterPendingLoads();
+    }
     [el.presetSquareAllBtn, el.preset169AllBtn, el.preset512AllBtn, el.preset1920WidthAllBtn]
       .filter(Boolean)
       .forEach((button) => {
@@ -6464,6 +6469,24 @@
     setStatus(`全画像の出力サイズを${size.width}×${size.height}pxに設定しました。`, "success");
   }
 
+  function applySelectedTransparencyToAll() {
+    const source = getSelected();
+    const targets = batchRecords();
+    if (!source || !targets.length || state.exporting || hasFilterPendingLoads()) return false;
+    if (!state.batchTargetIds && state.images.length < 2) return false;
+    const transparency = sanitizeTransparencyState(source.transparency);
+    recordImageHistory();
+    state.imageHistory.group = null;
+    targets.forEach((record) => {
+      record.transparency = { ...transparency };
+    });
+    state.transparencyPickingId = null;
+    refreshAll();
+    state.imageHistory.group = null;
+    setStatus(`透過設定を${targets.length}枚へ適用しました。「元に戻す」で取り消せます。`, "success");
+    return true;
+  }
+
   function applyCenteredRatioToAll(ratioLabel) {
     const ratio = ratioNumber(ratioLabel);
     if (!ratio || !state.images.length) return;
@@ -7831,6 +7854,7 @@
     });
     el.applyMarkedCropBtn?.addEventListener("click", () => applyMarkedBatch("crop"));
     el.applyMarkedResizeBtn?.addEventListener("click", () => applyMarkedBatch("resize"));
+    el.applyMarkedTransparencyBtn?.addEventListener("click", () => applyMarkedBatch("transparency"));
     el.applyMarkedFilterBtn?.addEventListener("click", () => applyMarkedBatch("filter"));
     el.exportMarkedBtn?.addEventListener("click", exportMarkedImages);
     el.saveProjectBtn?.addEventListener("click", saveProjectFile);
@@ -7873,7 +7897,7 @@
     if (el.batchSourceHint) el.batchSourceHint.textContent = source
       ? `設定元：${source.fileName} ／ チェックした${marked.length}枚が対象`
       : "一覧で設定元の画像を開き、処理する素材にチェックしてください。";
-    [[el.applyMarkedCropBtn, "切り抜き"], [el.applyMarkedResizeBtn, "サイズ"], [el.applyMarkedFilterBtn, "加工＋仕上げ"]].forEach(([button, label]) => {
+    [[el.applyMarkedCropBtn, "切り抜き"], [el.applyMarkedResizeBtn, "サイズ"], [el.applyMarkedTransparencyBtn, "透過設定"], [el.applyMarkedFilterBtn, "加工＋仕上げ"]].forEach(([button, label]) => {
       if (!button) return;
       button.textContent = `${marked.length}枚に${label}を適用`;
       button.disabled = busy || !marked.length || !source;
@@ -7885,6 +7909,7 @@
     }
     setElementHidden(el.applyMarkedCropBtn, state.mode !== "edit");
     setElementHidden(el.applyMarkedResizeBtn, state.mode !== "edit");
+    setElementHidden(el.applyMarkedTransparencyBtn, state.mode !== "edit");
     setElementHidden(el.applyMarkedFilterBtn, state.mode !== "filter");
     setElementHidden(el.batchSourceHint, !["edit", "filter"].includes(state.mode));
     const loading = busy || state.canvas.queuedLoadCount > 0 || state.canvas.pendingLoads.size > 0;
@@ -7904,6 +7929,9 @@
     try {
       if (kind === "crop") applySelectedCropToAll();
       else if (kind === "resize") applySelectedResizeToAll();
+      else if (kind === "transparency") {
+        if (!applySelectedTransparencyToAll()) return false;
+      }
       else if (kind === "filter") applySelectedFilterAndFinishToAll();
       else return false;
       setStatus(`チェックした${batchRecords().length}枚へ適用しました。「元に戻す」で取り消せます。`, "success");
@@ -7970,7 +7998,7 @@
     sanitizeTransparencyState, applyTransparencyToPixels, transparencySamplePoint,
     drawRecordInto, drawProcessedRecordInto, syncTransparencyControls, updateTransparencyFromControls, pickTransparencyColor,
     snapshotImageWorkspace, recordImageHistory, travelImageHistory, sweepImageSourceUrls, collectWorkspaceUrls,
-    applyMarkedBatch, exportMarkedImages, createImageZip, zipCrc32,
+    applyMarkedBatch, applySelectedTransparencyToAll, exportMarkedImages, createImageZip, zipCrc32,
     createProjectDocument, validateProjectDocument, unpackProject, decodeProjectAssets,
     prepareProjectImport, openPendingProject, saveProjectFile, cancelProjectImport,
     PROCESSING_PRESET_STORAGE_KEY,
