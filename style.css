@@ -876,6 +876,33 @@ a:focus-visible {
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 35%);
 }
 
+.edit-preview-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.edit-preview-controls .chip-button {
+  min-height: 36px;
+  padding: 7px 16px;
+}
+
+.edit-preview-controls .is-active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.edit-preview-error {
+  max-width: 100%;
+  padding: 24px;
+  color: #a52b38;
+  background: #fff;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
 .preview-placeholder {
   display: grid;
   place-items: center;
@@ -3600,6 +3627,7 @@ input[type="range"] {
 
 .edit-viewport.is-picking-transparency,
 .edit-viewport.is-picking-transparency *,
+#editResultCanvas.is-picking-transparency,
 .mobile-preview canvas.is-picking-transparency {
   cursor: crosshair;
 }

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="画像を外部へ送信せず、ブラウザだけで結合・分割・切り抜き・リサイズ・自由配置・フィルターによる画像加工ができるツールです。">
   <title>画像かんたん加工</title>
-  <link rel="stylesheet" href="style.css?v=20261123-2">
-  <script src="app.js?v=20261123-2" defer></script>
+  <link rel="stylesheet" href="style.css?v=20261123-3">
+  <script src="app.js?v=20261123-3" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#mainContent">メインコンテンツへ移動</a>
@@ -205,10 +205,14 @@
           </div>
           <div class="preview-meta">
             <span id="previewDimensions" class="preview-dimensions" aria-live="polite">—</span>
-            <span class="preview-hint">表示のみ縮小・元解像度で保存</span>
+            <span id="previewHint" class="preview-hint">表示のみ縮小・元解像度で保存</span>
           </div>
         </div>
 
+        <div id="editPreviewControls" class="edit-preview-controls is-hidden" role="group" aria-label="画像編集プレビューの表示" hidden>
+          <button id="editPreviewResultBtn" class="chip-button is-active" type="button" aria-pressed="true" disabled>仕上がり</button>
+          <button id="editPreviewCropBtn" class="chip-button" type="button" aria-pressed="false" disabled>切り抜き範囲</button>
+        </div>
         <div class="preview-stage">
           <div id="previewPlaceholder" class="preview-placeholder">
             <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="画像をここにドロップ、またはクリックして画像を選択">
@@ -237,7 +241,9 @@
             hidden
           ></canvas>
 
-          <div id="editViewport" class="edit-viewport is-hidden" aria-label="画像編集プレビュー">
+          <canvas id="editResultCanvas" class="preview-canvas is-hidden" aria-label="出力サイズと拡大・縮小方法を反映した仕上がり" hidden></canvas>
+          <p id="editPreviewError" class="edit-preview-error is-hidden" role="status" hidden></p>
+          <div id="editViewport" class="edit-viewport is-hidden" aria-label="切り抜き範囲の編集プレビュー">
             <canvas id="editCanvas" aria-label="選択中画像の編集プレビュー"></canvas>
             <div id="cropOverlay" class="crop-overlay" role="group" tabindex="0" aria-label="切り抜き範囲。ドラッグで移動、ハンドルで大きさを変更できます">
               <span class="crop-label" aria-hidden="true">切り抜き範囲</span>
@@ -491,7 +497,7 @@
                 <option value="smooth">なめらか（標準）</option>
                 <option value="nearest">ニアレストネイバー（最近傍法）</option>
               </select>
-              <p id="resizeMethodHelp" class="field-help">最近傍法は色を補間せずに拡大・縮小します。ドット絵などに使えます。サイズの一括適用では、この方法もコピーします。</p>
+              <p id="resizeMethodHelp" class="field-help">最近傍法は色を補間せずに拡大・縮小します。ドット絵などに使えます。「仕上がり」で結果を確認できます。サイズの一括適用では、この方法もコピーします。</p>
             </div>
           </section>
 
@@ -1178,6 +1184,14 @@
       <div class="app-dialog__body update-card-list">
         <article class="update-card">
           <div class="update-card__meta"><time datetime="2026-11-23">2026.11.23</time><span>最新</span></div>
+          <h3>拡大・縮小後の仕上がりをプレビューに表示</h3>
+          <ul>
+            <li>「仕上がり」に出力サイズと拡大・縮小方法を反映し、最近傍法の結果も保存前に確認できます。</li>
+            <li>切り抜き枠を操作するときは「切り抜き範囲」に切り替えます。スマートフォンの小型プレビューには仕上がりを表示します。</li>
+          </ul>
+        </article>
+        <article class="update-card">
+          <div class="update-card__meta"><time datetime="2026-11-23">2026.11.23</time></div>
           <h3>拡大・縮小方法の選択を追加</h3>
           <ul>
             <li>「画像編集」の「出力サイズ」で、標準の「なめらか」と「ニアレストネイバー（最近傍法）」を選べます。</li>

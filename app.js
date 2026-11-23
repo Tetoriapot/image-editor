@@ -51,6 +51,7 @@
     pendingProject: null,
     draggedId: null,
     cropGesture: null,
+    editPreviewMode: "result",
     transparencyPickingId: null,
     previewFrame: 0,
     loadGeneration: 0,
@@ -156,6 +157,12 @@
     "combinePreviewCanvas",
     "editViewport",
     "editCanvas",
+    "editResultCanvas",
+    "editPreviewControls",
+    "editPreviewResultBtn",
+    "editPreviewCropBtn",
+    "editPreviewError",
+    "previewHint",
     "cropOverlay",
     "canvasViewport",
     "canvasWorkspace",
@@ -672,6 +679,8 @@
     el.resizeHeight?.addEventListener("input", () => updateResizeFromNumbers("height", true));
     el.resizeHeight?.addEventListener("change", () => updateResizeFromNumbers("height"));
     el.resizeMethod?.addEventListener("change", updateResizeMethod);
+    el.editPreviewResultBtn?.addEventListener("click", () => setEditPreviewMode("result"));
+    el.editPreviewCropBtn?.addEventListener("click", () => setEditPreviewMode("crop"));
     el.keepAspect?.addEventListener("change", () => {
       const record = getSelected();
       if (!record) return;
@@ -701,6 +710,7 @@
       syncTransparencyControls();
     });
     el.editViewport?.addEventListener("pointerdown", pickTransparencyColor, true);
+    el.editResultCanvas?.addEventListener("pointerdown", pickTransparencyColor);
     el.mobilePreviewCanvas?.addEventListener("pointerdown", pickTransparencyColor);
     el.resetTransparencyBtn?.addEventListener("click", () => {
       const record = getSelected();
@@ -2973,7 +2983,8 @@
     const isSplit = state.mode === "split";
     setElementHidden(el.previewPlaceholder, isCanvas || !isEmpty);
     setElementHidden(el.combinePreviewCanvas, isCanvas || isEmpty || state.mode !== "combine");
-    setElementHidden(el.editViewport, isCanvas || isEmpty || state.mode !== "edit");
+    syncEditPreviewControls();
+    if (isEmpty || state.mode !== "edit") releaseEditResultPreview();
     setElementHidden(el.filterPreviewCanvas, isCanvas || isEmpty || !isFilter);
     setElementHidden(el.splitPreviewCanvas, isCanvas || isEmpty || !isSplit);
     if (!isFilter || isEmpty) setElementHidden(el.filterFinishSelectionBox, true);
@@ -2988,6 +2999,7 @@
 
   function updateActionAvailability() {
     syncTransparencyControls();
+    syncEditPreviewControls();
     recordImageHistory();
     const hasImages = state.images.length > 0;
     const hasPendingLoads = state.queuedLoadCount > 0 || state.pendingLoads.size > 0;
@@ -3728,6 +3740,7 @@
       ? "プレビューの画像で透明にしたい色をクリック／タップしてください。スマホでは小型プレビューも使えます。Escでキャンセルできます。"
       : "同じ色は背景以外の部分も透明になります。色が残る場合は許容範囲を少しずつ上げてください。";
     el.editViewport?.classList.toggle("is-picking-transparency", picking);
+    el.editResultCanvas?.classList.toggle("is-picking-transparency", picking);
     el.mobilePreviewCanvas?.classList.toggle("is-picking-transparency", picking);
   }
 
@@ -3766,10 +3779,11 @@
     event.preventDefault();
     event.stopPropagation();
     const isMobilePreview = event.currentTarget === el.mobilePreviewCanvas;
-    const rect = (isMobilePreview ? el.mobilePreviewCanvas : el.editCanvas).getBoundingClientRect();
+    const isResult = isMobilePreview || state.editPreviewMode !== "crop";
+    const rect = (isMobilePreview ? el.mobilePreviewCanvas : isResult ? el.editResultCanvas : el.editCanvas).getBoundingClientRect();
     if (event.clientX < rect.left || event.clientY < rect.top || event.clientX >= rect.left + rect.width || event.clientY >= rect.top + rect.height) return;
     const oriented = getOrientedDimensions(record);
-    const region = isMobilePreview ? normalizedCrop(record) : { x: 0, y: 0, ...oriented };
+    const region = isResult ? normalizedCrop(record) : { x: 0, y: 0, ...oriented };
     const point = transparencySamplePoint(record,
       (region.x + (event.clientX - rect.left) / rect.width * region.width) / oriented.width,
       (region.y + (event.clientY - rect.top) / rect.height * region.height) / oriented.height);
@@ -3777,7 +3791,20 @@
     try {
       sample.width = sample.height = 1;
       const context = requireCanvasContext(sample, { willReadFrequently: true });
-      context.drawImage(record.image, point.x, point.y, 1, 1, 0, 0, 1, 1);
+      if (isResult) {
+        const size = getProcessedDimensions(record);
+        let ratioX = (event.clientX - rect.left) / rect.width;
+        let ratioY = (event.clientY - rect.top) / rect.height;
+        if (isMobilePreview && el.mobilePreviewCanvas.width > 0 && el.mobilePreviewCanvas.height > 0) {
+          ratioX = (Math.floor(ratioX * el.mobilePreviewCanvas.width) + 0.5) / el.mobilePreviewCanvas.width;
+          ratioY = (Math.floor(ratioY * el.mobilePreviewCanvas.height) + 0.5) / el.mobilePreviewCanvas.height;
+        }
+        const outputX = Math.min(size.width - 1, Math.floor(ratioX * size.width));
+        const outputY = Math.min(size.height - 1, Math.floor(ratioY * size.height));
+        drawRecordGeometryInto(context, record, -outputX, -outputY, size.width, size.height);
+      } else {
+        context.drawImage(record.image, point.x, point.y, 1, 1, 0, 0, 1, 1);
+      }
       const pixel = context.getImageData(0, 0, 1, 1).data;
       if (!pixel[3]) {
         setStatus("ここは元から透明です。色のある部分を選んでください。", "warning");
@@ -3839,12 +3866,100 @@
     }
   }
 
+  let editResultCache = null;
+
+  function releaseEditResultPreview() {
+    if (!editResultCache) return;
+    editResultCache = null;
+    el.editResultCanvas.width = el.editResultCanvas.height = 1;
+  }
+
+  function getEditResultCanvas(record) {
+    const size = getProcessedDimensions(record);
+    assertExportSize(size.width, size.height);
+    const key = JSON.stringify([record.originalWidth, record.originalHeight, normalizedCrop(record),
+      size, record.rotation, record.flipX, record.flipY, sanitizeResizeMethod(record.resizeMethod),
+      sanitizeTransparencyState(record.transparency)]);
+    const canvas = el.editResultCanvas;
+    if (editResultCache?.image === record.image && editResultCache.key === key) return canvas;
+    editResultCache = null;
+    // Keep the actual output pixels: scaling directly to the viewport would skip
+    // the selected resize step, especially when reducing or resizing by a fraction.
+    try {
+      canvas.width = size.width;
+      canvas.height = size.height;
+      const context = requireCanvasContext(canvas);
+      drawRecordInto(context, record, 0, 0, size.width, size.height);
+    } catch (error) {
+      canvas.width = canvas.height = 1;
+      throw error;
+    }
+    editResultCache = { image: record.image, key };
+    return canvas;
+  }
+
+  function syncEditPreviewControls() {
+    const active = state.mode === "edit";
+    const hasImage = Boolean(getSelected());
+    const result = state.editPreviewMode !== "crop";
+    setElementHidden(el.editPreviewControls, !active);
+    setElementHidden(el.editViewport, !active || !hasImage || result);
+    setElementHidden(el.editResultCanvas, !active || !hasImage || !result);
+    setElementHidden(el.cropOverlay, result);
+    if (!active || !hasImage) setElementHidden(el.editPreviewError, true);
+    for (const [button, selected] of [[el.editPreviewResultBtn, result], [el.editPreviewCropBtn, !result]]) {
+      if (!button) continue;
+      button.disabled = !hasImage || state.exporting;
+      button.setAttribute("aria-pressed", String(selected));
+      button.classList.toggle("is-active", selected);
+    }
+    if (el.previewHint) el.previewHint.textContent = active
+      ? result ? "仕上がりを画面に合わせて表示" : "元画像上で切り抜き範囲を指定"
+      : "表示のみ縮小・元解像度で保存";
+  }
+
+  function setEditPreviewMode(mode) {
+    if (state.exporting || state.cropGesture) return;
+    state.editPreviewMode = mode === "crop" ? "crop" : "result";
+    syncEditPreviewControls();
+    renderEditPreview();
+  }
+
+  function showEditPreviewError(error) {
+    editResultCache = null;
+    el.editResultCanvas.width = el.editResultCanvas.height = 1;
+    setElementHidden(el.editResultCanvas, true);
+    if (el.editPreviewError) {
+      el.editPreviewError.textContent = `仕上がりを表示できませんでした。${error.message || "出力サイズを小さくして試してください。"}`;
+      setElementHidden(el.editPreviewError, false);
+    }
+  }
+
   function renderEditPreview() {
     recordImageHistory();
     requestAnimationFrame(renderMobilePreview);
     const record = getSelected();
     if (!record || state.mode !== "edit") return;
     record.crop = normalizedCrop(record);
+    syncEditPreviewControls();
+    setElementHidden(el.editPreviewError, true);
+    const size = getProcessedDimensions(record);
+    updatePreviewDimensions(size.width, size.height);
+    if (state.editPreviewMode !== "crop") {
+      try {
+        const canvas = getEditResultCanvas(record);
+        const stage = canvas.parentElement;
+        const width = Math.max(1, (stage?.clientWidth || 900) - 36);
+        const height = Math.max(1, (stage?.clientHeight || 640) - 36);
+        const scale = Math.min(width / size.width, height / size.height);
+        canvas.style.width = `${Math.max(1, Math.floor(size.width * scale))}px`;
+        canvas.style.height = `${Math.max(1, Math.floor(size.height * scale))}px`;
+        canvas.style.imageRendering = "pixelated";
+      } catch (error) {
+        showEditPreviewError(error);
+      }
+      return;
+    }
     const oriented = getOrientedDimensions(record);
     const viewportWidth = Math.max(1, el.editViewport.clientWidth || 900);
     const viewportHeight = Math.max(1, el.editViewport.clientHeight || 640);
@@ -6208,6 +6323,8 @@
     record.resizeAnchor = changed;
     if (!live) syncEditControls();
     updatePreviewDimensions(width, height);
+    state.editPreviewMode = "result";
+    schedulePreview();
   }
 
   function sanitizeResizeMethod(value) {
@@ -6218,6 +6335,7 @@
     const record = getSelected();
     if (!record || state.exporting) return;
     record.resizeMethod = sanitizeResizeMethod(el.resizeMethod.value);
+    state.editPreviewMode = "result";
     syncEditControls();
     schedulePreview();
   }
@@ -6225,6 +6343,7 @@
   function setSelectedResize(width, height, keepAspect = true) {
     const record = getSelected();
     if (!record) return;
+    state.editPreviewMode = "result";
     record.resize.width = width;
     record.resize.height = height;
     record.resize.keepAspect = keepAspect;
@@ -7991,9 +8110,9 @@
 
   function renderMobilePreview() {
     if (!el.mobilePreview || !globalThis.matchMedia?.("(max-width: 960px)").matches) return;
-    const source = state.mode === "canvas" ? el.canvasDisplayCanvas
+    let source = state.mode === "canvas" ? el.canvasDisplayCanvas
       : state.mode === "combine" ? el.combinePreviewCanvas
-        : state.mode === "edit" ? el.editCanvas : state.mode === "split" ? el.splitPreviewCanvas : el.filterPreviewCanvas;
+        : state.mode === "edit" ? el.editResultCanvas : state.mode === "split" ? el.splitPreviewCanvas : el.filterPreviewCanvas;
     const panel = document.querySelector?.(".preview-panel");
     const headerHeight = document.querySelector?.(".app-header")?.getBoundingClientRect().height || 100;
     el.mobilePreview.style.top = `${headerHeight + 6}px`;
@@ -8002,22 +8121,28 @@
     el.mobilePreview.hidden = !hasImage || !pastPreview;
     document.documentElement.style.setProperty("--mobile-header-height", `${headerHeight}px`);
     document.documentElement.style.setProperty("--mobile-preview-height", `${el.mobilePreview.hidden ? 0 : el.mobilePreview.getBoundingClientRect().height}px`);
-    if (el.mobilePreview.hidden || el.mobilePreviewCanvas.hidden || !source?.width) return;
+    if (el.mobilePreview.hidden || el.mobilePreviewCanvas.hidden) return;
     const canvas = el.mobilePreviewCanvas;
     const record = state.mode === "edit" ? getSelected() : null;
-    const size = record ? getProcessedDimensions(record) : source;
+    if (record) {
+      try { source = getEditResultCanvas(record); }
+      catch {
+        canvas.width = canvas.height = 1;
+        el.mobilePreviewLabel.textContent = "仕上がりを表示できません。出力サイズを小さくしてください。";
+        return;
+      }
+    }
+    if (!source?.width) return;
+    const size = source;
     const scale = Math.min(1, 280 / size.width, 140 / size.height);
     canvas.width = Math.max(1, Math.round(size.width * scale));
     canvas.height = Math.max(1, Math.round(size.height * scale));
     const context = canvas.getContext("2d");
     if (context) {
-      if (record) drawProcessedRecordInto(context, record, 0, 0, canvas.width, canvas.height);
-      else {
-        if ((state.mode === "split" || state.mode === "filter") && sanitizeResizeMethod(getSelected()?.resizeMethod) === "nearest") {
-          context.imageSmoothingEnabled = false;
-        }
-        context.drawImage(source, 0, 0, canvas.width, canvas.height);
+      if (record || ((state.mode === "split" || state.mode === "filter") && sanitizeResizeMethod(getSelected()?.resizeMethod) === "nearest")) {
+        context.imageSmoothingEnabled = false;
       }
+      context.drawImage(source, 0, 0, canvas.width, canvas.height);
     }
     document.documentElement.style.setProperty("--mobile-preview-height", `${el.mobilePreview.getBoundingClientRect().height}px`);
     el.mobilePreviewLabel.textContent = `${PROCESSING_PRESET_MODE_LABELS[state.mode]}・確認用プレビュー`;
@@ -8037,6 +8162,7 @@
 
   // Pure helpers are exposed only to make the local build easy to verify.
   globalThis.__IMAGE_TOOL_TEST__ = {
+    setEditPreviewMode, renderEditPreview, getEditResultCanvas, renderMobilePreview,
     sanitizeResizeMethod, updateResizeMethod,
     sanitizeTransparencyState, applyTransparencyToPixels, transparencySamplePoint,
     drawRecordInto, drawProcessedRecordInto, syncTransparencyControls, updateTransparencyFromControls, pickTransparencyColor,

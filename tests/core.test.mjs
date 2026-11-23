@@ -169,6 +169,10 @@ function loadActionApi(overrides = {}) {
     "updateCropFromNumbers",
     "updateResizeFromNumbers",
     "syncEditControls",
+    "renderEditPreview",
+    "setEditPreviewMode",
+    "renderMobilePreview",
+    "getEditResultCanvas",
     "resetRecord",
     "assertExportSize",
     "canvasToBlob",
@@ -6241,7 +6245,7 @@ test("transparency color picking uses original pixels and cancels when selection
   const harness = createTiledFilterHarness();
   const { api, elements } = loadActionApi({createElement:harness.createElement});
   const item = stateRecord("pick",2,2,{image:{width:2,height:2,pixels:new Uint8ClampedArray([255,0,0,255, 0,255,0,255, 0,0,255,255, 0,0,0,0])}});
-  api.state.images=[item]; api.state.selectedId=item.id; api.state.mode="edit";
+  api.state.images=[item]; api.state.selectedId=item.id; api.state.mode="edit"; api.state.editPreviewMode="crop";
   elements.editCanvas.getBoundingClientRect = () => ({left:10,top:20,width:100,height:100});
   api.state.transparencyPickingId=item.id;
   api.pickTransparencyColor({button:0,clientX:85,clientY:95,preventDefault(){},stopPropagation(){}});
@@ -6438,7 +6442,7 @@ function createSmoothingContext(canvas = { width: 1, height: 1 }) {
       });
     },
     restore() { Object.assign(this, stack.pop()); },
-    beginPath() {}, rect() {}, clip() {}, translate() {}, scale() {}, rotate() {}, clearRect() {},
+    beginPath() {}, rect() {}, clip() {}, translate() {}, scale() {}, rotate() {}, clearRect() {}, setTransform() {},
     drawImage(image, ...args) {
       draws.push({ image, args, smoothing: this.imageSmoothingEnabled, quality: this.imageSmoothingQuality });
     },
@@ -6630,4 +6634,269 @@ test("the resize method select has a label, both choices and explanatory help", 
   assert.match(select, /value="nearest"/);
   assert.match(select, /ニアレストネイバー|最近傍/);
   assert.match(select, /aria-describedby="[^"]+"/);
+});
+
+function createEditPreviewHarness() {
+  const harness = loadActionApi({ createElement(tagName) {
+    const element = new FakeElement();
+    if (tagName === "canvas") createSmoothingContext(element);
+    return element;
+  } });
+  const { elements } = harness;
+  const resultContext = createSmoothingContext(elements.editResultCanvas);
+  const cropContext = createSmoothingContext(elements.editCanvas);
+  elements.editViewport.clientWidth = 300;
+  elements.editViewport.clientHeight = 200;
+  elements.editCanvas.offsetLeft = 7;
+  elements.editCanvas.offsetTop = 9;
+  return { ...harness, resultContext, cropContext };
+}
+
+test("edit result preview uses output pixels regardless of device pixel ratio and applies the chosen sampling", () => {
+  const { api, elements, context, resultContext } = createEditPreviewHarness();
+  const item = stateRecord("resized-preview", 400, 200, {
+    image: {}, resize: { width: 80, height: 120, keepAspect: false }, resizeMethod: "nearest",
+  });
+  api.state.images = [item]; api.state.selectedId = item.id; api.state.mode = "edit";
+  context.window.devicePixelRatio = 2;
+  assert.equal(api.state.editPreviewMode, "result");
+  api.renderEditPreview();
+  assert.deepEqual([elements.editResultCanvas.width, elements.editResultCanvas.height], [80, 120]);
+  assert.equal(elements.editResultCanvas.hidden, false);
+  assert.equal(elements.editViewport.hidden, true);
+  assert.equal(elements.editResultCanvas.style.imageRendering, "pixelated");
+  assert.equal(resultContext.draws.at(-1).smoothing, false);
+  assert.equal(elements.previewDimensions.textContent, "80 × 120 px");
+  item.resizeMethod = "smooth";
+  api.renderEditPreview();
+  assert.equal(resultContext.draws.at(-1).smoothing, true);
+  assert.equal(elements.editResultCanvas.style.imageRendering, "pixelated", "display enlargement must preserve the already-resampled output pixels");
+});
+
+test("crop preview keeps source coordinates and switching views does not change the document or history", () => {
+  const { api, elements } = createEditPreviewHarness();
+  const item = stateRecord("crop-preview", 400, 200, {
+    image: {}, crop: { x: 50, y: 25, width: 100, height: 50 },
+    resize: { width: 80, height: 120, keepAspect: false }, resizeMethod: "nearest",
+  });
+  api.state.images = [item]; api.state.selectedId = item.id; api.state.mode = "edit";
+  forgetImageHistory(api);
+  const before = plain(api.snapshotImageWorkspace());
+  api.setEditPreviewMode("crop");
+  api.renderEditPreview();
+  assert.equal(elements.editResultCanvas.hidden, true);
+  assert.equal(elements.editViewport.hidden, false);
+  assert.deepEqual([elements.editCanvas.width, elements.editCanvas.height], [300, 150]);
+  assert.equal(elements.cropOverlay.style.left, "44.5px");
+  assert.equal(elements.cropOverlay.style.top, "27.75px");
+  assert.equal(elements.cropOverlay.style.width, "75px");
+  assert.equal(elements.cropOverlay.style.height, "37.5px");
+  assert.equal(Number(elements.cropOverlay.dataset.scaleX), 4 / 3);
+  api.setEditPreviewMode("result");
+  api.renderEditPreview();
+  assert.equal(elements.editResultCanvas.hidden, false);
+  assert.equal(elements.editViewport.hidden, true);
+  assert.deepEqual(plain(api.snapshotImageWorkspace()), before);
+  assert.equal(api.state.imageHistory.past.length, 0);
+});
+
+test("dimension inputs and sampling changes switch to the result and schedule live preview updates", () => {
+  const { api, elements } = createEditPreviewHarness();
+  const item = stateRecord("live-preview", 100, 80, { image: {}, resizeMethod: "smooth" });
+  api.state.images = [item]; api.state.selectedId = item.id; api.state.mode = "edit";
+  api.state.editPreviewMode = "crop";
+  elements.resizeWidth.value = "50"; elements.resizeHeight.value = "40";
+  let previousFrame = api.state.previewFrame;
+  api.updateResizeFromNumbers("width", true);
+  assert.equal(api.state.editPreviewMode, "result");
+  assert.ok(api.state.previewFrame > previousFrame);
+  assert.deepEqual(plain(item.resize), { width: 50, height: 40, keepAspect: true });
+  api.state.editPreviewMode = "crop";
+  previousFrame = api.state.previewFrame;
+  elements.resizeMethod.value = "nearest";
+  api.updateResizeMethod();
+  assert.equal(api.state.editPreviewMode, "result");
+  assert.ok(api.state.previewFrame > previousFrame);
+  api.state.editPreviewMode = "crop";
+  previousFrame = api.state.previewFrame;
+  api.setSelectedResize(512, 512, false);
+  assert.equal(api.state.editPreviewMode, "result");
+  assert.ok(api.state.previewFrame > previousFrame);
+  assert.equal(item.resizeMethod, "nearest");
+});
+
+test("result bitmap cache avoids repeated resampling and invalidates on every output-affecting edit", () => {
+  const { api, resultContext, elements } = createEditPreviewHarness();
+  const item = stateRecord("cached-preview", 40, 20, {
+    image: {}, resize: { width: 20, height: 10, keepAspect: false }, resizeMethod: "smooth",
+  });
+  assert.equal(api.getEditResultCanvas(item), elements.editResultCanvas);
+  let draws = resultContext.draws.length;
+  api.getEditResultCanvas(item);
+  assert.equal(resultContext.draws.length, draws, "unchanged output should reuse its bitmap");
+  for (const mutate of [
+    () => { item.resize.width = 16; },
+    () => { item.resizeMethod = "nearest"; },
+    () => { item.crop.x = 4; item.crop.width = 32; },
+    () => { item.flipX = true; },
+    () => { item.rotation = 90; },
+    () => { item.transparency = { enabled: false, opacity: 50 }; },
+    () => { item.image = {}; },
+  ]) {
+    mutate();
+    api.getEditResultCanvas(item);
+    assert.ok(resultContext.draws.length > draws, "changed output must be rendered again");
+    draws = resultContext.draws.length;
+  }
+});
+
+test("oversized result previews report an error without mutating image settings and recover after resizing", () => {
+  const { api, elements } = createEditPreviewHarness();
+  const item = stateRecord("oversized-preview", 40, 20, {
+    image: {}, resize: { width: 32767, height: 32767, keepAspect: false }, resizeMethod: "nearest",
+  });
+  api.state.images = [item]; api.state.selectedId = item.id; api.state.mode = "edit";
+  const before = plain(item);
+  assert.doesNotThrow(() => api.renderEditPreview());
+  assert.equal(elements.editPreviewError.hidden, false);
+  assert.ok(elements.editPreviewError.textContent.length > 0);
+  assert.deepEqual(plain(item), before);
+  item.resize.width = 80; item.resize.height = 40;
+  api.renderEditPreview();
+  assert.equal(elements.editPreviewError.hidden, true);
+  assert.equal(elements.editResultCanvas.hidden, false);
+  assert.deepEqual([elements.editResultCanvas.width, elements.editResultCanvas.height], [80, 40]);
+});
+
+test("mobile edit preview scales the completed output bitmap in both result and crop views", () => {
+  const { api, elements, document, context } = createEditPreviewHarness();
+  const item = stateRecord("mobile-result", 13, 9, {
+    image: {}, resize: { width: 5, height: 3, keepAspect: false }, resizeMethod: "nearest",
+  });
+  api.state.images = [item]; api.state.selectedId = item.id; api.state.mode = "edit";
+  context.matchMedia = () => ({ matches: true });
+  document.documentElement = { style: { setProperty() {} } };
+  document.querySelector = (selector) => ({ getBoundingClientRect: () => selector === ".preview-panel" ? { bottom: -1 } : { height: 100 } });
+  const thumbnail = createSmoothingContext(elements.mobilePreviewCanvas);
+  for (const mode of ["result", "crop"]) {
+    api.state.editPreviewMode = mode;
+    api.renderMobilePreview();
+    assert.equal(elements.mobilePreview.hidden, false);
+    assert.deepEqual([elements.mobilePreviewCanvas.width, elements.mobilePreviewCanvas.height], [5, 3]);
+    const draw = thumbnail.draws.at(-1);
+    assert.equal(draw.image, elements.editResultCanvas, "the thumbnail must not resample the source image directly");
+    assert.deepEqual([draw.image.width, draw.image.height], [5, 3]);
+    assert.equal(draw.smoothing, false);
+  }
+});
+
+test("result and mobile color pickers sample the resized pixel before transparency is applied", () => {
+  for (const mobile of [false, true]) for (const method of ["nearest", "smooth"]) {
+    const samples = [];
+    const { api, elements } = loadActionApi({ createElement(tagName) {
+      const canvas = new FakeElement();
+      if (tagName !== "canvas") return canvas;
+      const sample = createSmoothingContext(canvas);
+      sample.rectangles = [];
+      sample.rect = (...args) => sample.rectangles.push(args);
+      sample.getImageData = () => ({ width: 1, height: 1, data: new Uint8ClampedArray([17, 34, 51, 255]) });
+      samples.push(sample);
+      return canvas;
+    } });
+    const item = stateRecord("result-picker", 40, 20, {
+      image: {}, crop: { x: 10, y: 4, width: 20, height: 10 },
+      resize: { width: 7, height: 3, keepAspect: false }, resizeMethod: method,
+      transparency: { enabled: true, color: "#ffffff", tolerance: 5, opacity: 0 },
+    });
+    api.state.images = [item]; api.state.selectedId = item.id; api.state.mode = "edit";
+    api.state.editPreviewMode = mobile ? "crop" : "result";
+    api.state.transparencyPickingId = item.id;
+    const target = mobile ? elements.mobilePreviewCanvas : elements.editResultCanvas;
+    target.getBoundingClientRect = () => ({ left: 10, top: 20, width: 100, height: 100 });
+    elements.editCanvas.getBoundingClientRect = () => ({ left: 500, top: 500, width: 100, height: 100 });
+    api.pickTransparencyColor({ currentTarget: target, button: 0, clientX: 60, clientY: 70, preventDefault() {}, stopPropagation() {} });
+    assert.equal(item.transparency.color, "#112233");
+    assert.equal(item.transparency.opacity, 0, "picking keeps the existing opacity");
+    assert.deepEqual(samples[0].rectangles[0], [-3, -1, 7, 3], "sample coordinates refer to the resized bitmap");
+    assert.equal(samples[0].draws[0].smoothing, method === "smooth");
+    assert.equal(api.state.transparencyPickingId, null);
+  }
+});
+
+test("preview controls expose their selection, disable without an image or while exporting, and release unused bitmaps", () => {
+  const { api, elements } = createEditPreviewHarness();
+  assert.equal(elements.editPreviewResultBtn.disabled, true);
+  assert.equal(elements.editPreviewCropBtn.disabled, true);
+  const item = stateRecord("preview-controls", 40, 20, { image: {} });
+  api.state.images = [item]; api.state.selectedId = item.id; api.state.mode = "edit";
+  api.updateActionAvailability();
+  assert.equal(elements.editPreviewResultBtn.disabled, false);
+  api.setEditPreviewMode("crop");
+  assert.equal(elements.editPreviewResultBtn.getAttribute("aria-pressed"), "false");
+  assert.equal(elements.editPreviewCropBtn.getAttribute("aria-pressed"), "true");
+  api.state.exporting = true;
+  api.updateActionAvailability();
+  assert.equal(elements.editPreviewResultBtn.disabled, true);
+  assert.equal(elements.editPreviewCropBtn.disabled, true);
+  api.setEditPreviewMode("result");
+  assert.equal(api.state.editPreviewMode, "crop");
+  api.state.exporting = false;
+  api.setEditPreviewMode("result");
+  assert.deepEqual([elements.editResultCanvas.width, elements.editResultCanvas.height], [40, 20]);
+  api.state.images = []; api.state.selectedId = null;
+  api.updateEmptyState();
+  assert.deepEqual([elements.editResultCanvas.width, elements.editResultCanvas.height], [1, 1]);
+  assert.equal(elements.editResultCanvas.hidden, true);
+});
+
+test("mobile color picking uses the center of the displayed thumbnail pixel when output is reduced", () => {
+  const rectangles = [];
+  const { api, elements } = loadActionApi({ createElement(tagName) {
+    const canvas = new FakeElement();
+    if (tagName !== "canvas") return canvas;
+    const sample = createSmoothingContext(canvas);
+    sample.rect = (...args) => rectangles.push(args);
+    sample.getImageData = () => ({ width: 1, height: 1, data: new Uint8ClampedArray([17, 34, 51, 255]) });
+    return canvas;
+  } });
+  const item = stateRecord("reduced-picker", 1000, 500, {
+    image: {}, resize: { width: 500, height: 250, keepAspect: true }, resizeMethod: "nearest",
+  });
+  api.state.images = [item]; api.state.selectedId = item.id; api.state.mode = "edit";
+  const target = elements.mobilePreviewCanvas;
+  target.width = 280; target.height = 140;
+  target.getBoundingClientRect = () => ({ left: 10, top: 20, width: 560, height: 280 });
+  for (const [x, y, expectedX, expectedY] of [
+    [4.1, 6.1, 4, 6],
+    [5.9, 7.9, 4, 6],
+    [559.9, 279.9, 499, 249],
+  ]) {
+    api.state.transparencyPickingId = item.id;
+    api.pickTransparencyColor({ currentTarget: target, button: 0, clientX: 10 + x, clientY: 20 + y, preventDefault() {}, stopPropagation() {} });
+    assert.deepEqual(rectangles.at(-1), [-expectedX, -expectedY, 500, 250]);
+    assert.equal(item.transparency.color, "#112233");
+  }
+  api.state.transparencyPickingId = item.id;
+  api.pickTransparencyColor({ currentTarget: target, button: 0, clientX: 9.9, clientY: 20, preventDefault() {}, stopPropagation() {} });
+  assert.equal(rectangles.length, 3, "clicks outside the preview must not sample a pixel");
+  assert.equal(api.state.transparencyPickingId, item.id);
+});
+
+test("failed result rendering releases the bitmap and retries instead of retaining a stale cache", () => {
+  const { api, elements, resultContext } = createEditPreviewHarness();
+  const item = stateRecord("failed-result", 100, 50, {
+    image: {}, resize: { width: 80, height: 40, keepAspect: true }, resizeMethod: "smooth",
+  });
+  api.getEditResultCanvas(item);
+  item.resizeMethod = "nearest";
+  const originalDraw = resultContext.drawImage;
+  resultContext.drawImage = () => { throw new Error("synthetic preview draw failure"); };
+  assert.throws(() => api.getEditResultCanvas(item), /synthetic preview draw failure/);
+  assert.deepEqual([elements.editResultCanvas.width, elements.editResultCanvas.height], [1, 1]);
+  resultContext.drawImage = originalDraw;
+  const beforeRetry = resultContext.draws.length;
+  api.getEditResultCanvas(item);
+  assert.ok(resultContext.draws.length > beforeRetry);
+  assert.deepEqual([elements.editResultCanvas.width, elements.editResultCanvas.height], [80, 40]);
+  assert.equal(resultContext.draws.at(-1).smoothing, false);
 });
