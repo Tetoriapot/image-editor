@@ -328,6 +328,7 @@
     "cropHeight",
     "resizeWidth",
     "resizeHeight",
+    "resizeMethod",
     "keepAspect",
     "resetSizeBtn",
     "preset512Btn",
@@ -670,6 +671,7 @@
     el.resizeWidth?.addEventListener("change", () => updateResizeFromNumbers("width"));
     el.resizeHeight?.addEventListener("input", () => updateResizeFromNumbers("height", true));
     el.resizeHeight?.addEventListener("change", () => updateResizeFromNumbers("height"));
+    el.resizeMethod?.addEventListener("change", updateResizeMethod);
     el.keepAspect?.addEventListener("change", () => {
       const record = getSelected();
       if (!record) return;
@@ -1191,6 +1193,7 @@
           cropRatio: "free",
       resize: { width: null, height: null, keepAspect: true },
           resizeAnchor: "width",
+          resizeMethod: "smooth",
           rotation: 0,
           flipX: false,
           flipY: false,
@@ -1787,6 +1790,7 @@
           keepAspect: resizeSource.keepAspect !== false,
           anchor: resizeSource.anchor === "height" ? "height" : "width",
         },
+        resizeMethod: sanitizeResizeMethod(source.resizeMethod),
         output,
       };
     }
@@ -1930,6 +1934,7 @@
           keepAspect: record.resize?.keepAspect,
           anchor: record.resizeAnchor,
         },
+        resizeMethod: record.resizeMethod,
         output,
       });
     }
@@ -2005,6 +2010,7 @@
         keepAspect: settings.resize.keepAspect,
       };
       record.resizeAnchor = settings.resize.anchor;
+      record.resizeMethod = settings.resizeMethod;
       reconcileResize(record, record.resizeAnchor);
     } else if (mode === "canvas") {
       const before = snapshotCanvasState();
@@ -3026,6 +3032,7 @@
     el.modeSplitBtn && (el.modeSplitBtn.disabled = state.exporting);
     el.splitColumns && (el.splitColumns.disabled = state.exporting);
     el.splitRows && (el.splitRows.disabled = state.exporting);
+    if (el.resizeMethod) el.resizeMethod.disabled = !getSelected() || state.exporting;
     el.clearAllBtn && (el.clearAllBtn.disabled = isCanvas
       ? (!hasCanvasLayers && !hasCanvasPending) || state.exporting
       : (!hasImages && !hasPendingLoads && !hasFinishPending) || state.exporting);
@@ -3618,7 +3625,7 @@
     context.scale(record.flipX ? -1 : 1, record.flipY ? -1 : 1);
     context.translate(-oriented.width / 2, -oriented.height / 2);
     applyOrientationTransform(context, record);
-    context.imageSmoothingEnabled = true;
+    context.imageSmoothingEnabled = sanitizeResizeMethod(record.resizeMethod) !== "nearest";
     context.imageSmoothingQuality = "high";
     context.drawImage(record.image, 0, 0, record.originalWidth, record.originalHeight);
     context.restore();
@@ -3671,14 +3678,16 @@
     const height = Math.max(1, Math.ceil(dh * Math.hypot(transform.c, transform.d)));
     const tile = document.createElement("canvas");
     const neutralGeometry = isRecordGeometryNeutral(record);
+    context.save();
     try {
+      if (sanitizeResizeMethod(record.resizeMethod) === "nearest") context.imageSmoothingEnabled = false;
       for (let top = 0; top < height; top += 512) {
         for (let left = 0; left < width; left += 512) {
           tile.width = Math.min(512, width - left);
           tile.height = Math.min(512, height - top);
           const tileContext = requireCanvasContext(tile, { willReadFrequently: true });
           tileContext.clearRect(0, 0, tile.width, tile.height);
-          tileContext.imageSmoothingEnabled = true;
+          tileContext.imageSmoothingEnabled = sanitizeResizeMethod(record.resizeMethod) !== "nearest";
           tileContext.imageSmoothingQuality = "high";
           if (neutralGeometry) {
             tileContext.drawImage(record.image, 0, 0, record.originalWidth, record.originalHeight, -left, -top, width, height);
@@ -3691,6 +3700,7 @@
         }
       }
     } finally {
+      context.restore();
       tile.width = 1;
       tile.height = 1;
     }
@@ -3803,7 +3813,13 @@
   function drawProcessedRecordInto(context, record, dx, dy, dw, dh) {
     const transparency = sanitizeTransparencyState(record.transparency);
     if (isRecordGeometryNeutral(record) && !transparency.enabled && transparency.opacity === 100) {
-      context.drawImage(record.image, 0, 0, record.originalWidth, record.originalHeight, dx, dy, dw, dh);
+      context.save();
+      try {
+        if (sanitizeResizeMethod(record.resizeMethod) === "nearest") context.imageSmoothingEnabled = false;
+        context.drawImage(record.image, 0, 0, record.originalWidth, record.originalHeight, dx, dy, dw, dh);
+      } finally {
+        context.restore();
+      }
       return;
     }
     drawRecordInto(context, record, dx, dy, dw, dh);
@@ -3889,6 +3905,10 @@
       el.flipYBtn,
     ].filter(Boolean);
     controls.forEach((control) => (control.disabled = !record));
+    if (el.resizeMethod) {
+      el.resizeMethod.value = sanitizeResizeMethod(record?.resizeMethod);
+      el.resizeMethod.disabled = !record || state.exporting;
+    }
     if (!record) return;
 
     record.crop = normalizedCrop(record);
@@ -6190,6 +6210,18 @@
     updatePreviewDimensions(width, height);
   }
 
+  function sanitizeResizeMethod(value) {
+    return value === "nearest" ? "nearest" : "smooth";
+  }
+
+  function updateResizeMethod() {
+    const record = getSelected();
+    if (!record || state.exporting) return;
+    record.resizeMethod = sanitizeResizeMethod(el.resizeMethod.value);
+    syncEditControls();
+    schedulePreview();
+  }
+
   function setSelectedResize(width, height, keepAspect = true) {
     const record = getSelected();
     if (!record) return;
@@ -6459,14 +6491,16 @@
     const source = getSelected();
     if (!source || state.images.length < 2) return;
     const size = getProcessedDimensions(source);
+    const resizeMethod = sanitizeResizeMethod(source.resizeMethod);
     batchRecords().forEach((record) => {
       record.resize.width = size.width;
       record.resize.height = size.height;
       record.resize.keepAspect = false;
       record.resizeAnchor = "width";
+      record.resizeMethod = resizeMethod;
     });
     refreshAll();
-    setStatus(`全画像の出力サイズを${size.width}×${size.height}pxに設定しました。`, "success");
+    setStatus(`全画像の出力サイズを${size.width}×${size.height}pxに設定し、拡大・縮小方法も適用しました。`, "success");
   }
 
   function applySelectedTransparencyToAll() {
@@ -6550,6 +6584,7 @@
     record.cropRatio = "free";
     record.resize = { width: null, height: null, keepAspect: true };
     record.resizeAnchor = "width";
+    record.resizeMethod = "smooth";
   }
 
   function resetCanvasLayer(layer, offset = 0) {
@@ -7423,7 +7458,7 @@
       const finishLayers = [];
       for (const layer of record.finishLayers) finishLayers.push(await packLayer(layer));
       packedImages.push({
-        ...pickProjectProperties(record, ["id", "fileName", "crop", "cropRatio", "resize", "resizeAnchor", "rotation", "flipX", "flipY", "transparency", "filter"]),
+        ...pickProjectProperties(record, ["id", "fileName", "crop", "cropRatio", "resize", "resizeAnchor", "resizeMethod", "rotation", "flipX", "flipY", "transparency", "filter"]),
         asset: await sourceId(record), finishLayers,
       });
     }
@@ -7558,6 +7593,7 @@
         cropRatio: ["free", "1:1", "4:3", "3:4", "16:9", "9:16"].includes(saved.cropRatio) ? saved.cropRatio : "free",
         resize: { width: nullablePresetDimension(saved.resize?.width), height: nullablePresetDimension(saved.resize?.height), keepAspect: saved.resize?.keepAspect !== false },
         resizeAnchor: saved.resizeAnchor === "height" ? "height" : "width", filter: sanitizeFilterState(saved.filter),
+        resizeMethod: sanitizeResizeMethod(saved.resizeMethod),
         finishLayers: saved.finishLayers.map((layer) => sanitizeFinishLayerState({ ...pickProjectProperties(layer, PROJECT_LAYER_KEYS), ...sources.get(layer.asset) })),
       };
       const bounds = getOrientedDimensions(record);
@@ -7976,7 +8012,12 @@
     const context = canvas.getContext("2d");
     if (context) {
       if (record) drawProcessedRecordInto(context, record, 0, 0, canvas.width, canvas.height);
-      else context.drawImage(source, 0, 0, canvas.width, canvas.height);
+      else {
+        if ((state.mode === "split" || state.mode === "filter") && sanitizeResizeMethod(getSelected()?.resizeMethod) === "nearest") {
+          context.imageSmoothingEnabled = false;
+        }
+        context.drawImage(source, 0, 0, canvas.width, canvas.height);
+      }
     }
     document.documentElement.style.setProperty("--mobile-preview-height", `${el.mobilePreview.getBoundingClientRect().height}px`);
     el.mobilePreviewLabel.textContent = `${PROCESSING_PRESET_MODE_LABELS[state.mode]}・確認用プレビュー`;
@@ -7996,6 +8037,7 @@
 
   // Pure helpers are exposed only to make the local build easy to verify.
   globalThis.__IMAGE_TOOL_TEST__ = {
+    sanitizeResizeMethod, updateResizeMethod,
     sanitizeTransparencyState, applyTransparencyToPixels, transparencySamplePoint,
     drawRecordInto, drawProcessedRecordInto, syncTransparencyControls, updateTransparencyFromControls, pickTransparencyColor,
     snapshotImageWorkspace, recordImageHistory, travelImageHistory, sweepImageSourceUrls, collectWorkspaceUrls,

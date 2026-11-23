@@ -168,6 +168,7 @@ function loadActionApi(overrides = {}) {
     "apply1920WidthToAll",
     "updateCropFromNumbers",
     "updateResizeFromNumbers",
+    "syncEditControls",
     "resetRecord",
     "assertExportSize",
     "canvasToBlob",
@@ -2257,6 +2258,8 @@ test("filter preview uses a bounded canvas while comparison bypasses pixel proce
   elements.filterPreviewCanvas.parentElement = { clientWidth: 46, clientHeight: 46 };
   const calls = [];
   const context = {
+    save() {},
+    restore() {},
     clearRect(...args) { calls.push(["clearRect", ...args]); },
     drawImage(...args) { calls.push(["drawImage", ...args]); },
     getImageData(_x, _y, width, height) {
@@ -6418,4 +6421,213 @@ test("all four image pickers accept GIF alongside existing image formats", () =>
       assert.ok(accept?.includes(format), `${id} must accept ${format}`);
     }
   }
+});
+
+function createSmoothingContext(canvas = { width: 1, height: 1 }) {
+  const draws = [], stack = [];
+  const context = {
+    draws,
+    imageSmoothingEnabled: true,
+    imageSmoothingQuality: "low",
+    globalAlpha: 1,
+    save() {
+      stack.push({
+        imageSmoothingEnabled: this.imageSmoothingEnabled,
+        imageSmoothingQuality: this.imageSmoothingQuality,
+        globalAlpha: this.globalAlpha,
+      });
+    },
+    restore() { Object.assign(this, stack.pop()); },
+    beginPath() {}, rect() {}, clip() {}, translate() {}, scale() {}, rotate() {}, clearRect() {},
+    drawImage(image, ...args) {
+      draws.push({ image, args, smoothing: this.imageSmoothingEnabled, quality: this.imageSmoothingQuality });
+    },
+    getImageData(_x, _y, width, height) {
+      return { width, height, data: new Uint8ClampedArray(width * height * 4) };
+    },
+    putImageData() {},
+    getTransform() { return { a: 1, b: 0, c: 0, d: 1 }; },
+  };
+  canvas.getContext = () => context;
+  return context;
+}
+
+test("resize methods default to existing smoothing and accept only the nearest option", () => {
+  const api = loadPureApi();
+  assert.equal(api.sanitizeResizeMethod("nearest"), "nearest");
+  for (const value of [undefined, null, "smooth", "NEAREST", "invalid", true, 1, {}]) {
+    assert.equal(api.sanitizeResizeMethod(value), "smooth");
+  }
+});
+
+test("resize method selection edits only the selected image, supports history and locks during export", () => {
+  const { api, elements } = loadActionApi();
+  api.state.mode = "edit";
+  api.syncEditControls();
+  assert.equal(elements.resizeMethod.disabled, true);
+  const item = stateRecord("selected", 100, 80, { resizeMethod: "smooth" });
+  const untouched = stateRecord("untouched", 100, 80, { resizeMethod: "smooth" });
+  api.state.images = [item, untouched]; api.state.selectedId = item.id;
+  forgetImageHistory(api);
+  api.syncEditControls();
+  assert.equal(elements.resizeMethod.disabled, false);
+  assert.equal(elements.resizeMethod.value, "smooth");
+  elements.resizeMethod.value = "nearest";
+  elements.resizeMethod.dispatchEvent({ type: "change" });
+  assert.equal(item.resizeMethod, "nearest");
+  assert.equal(untouched.resizeMethod, "smooth");
+  assert.equal(api.state.imageHistory.past.length, 1);
+  assert.equal(api.travelImageHistory("undo"), true);
+  assert.equal(api.state.images[0].resizeMethod, "smooth");
+  assert.equal(elements.resizeMethod.value, "smooth");
+  assert.equal(api.travelImageHistory("redo"), true);
+  assert.equal(api.state.images[0].resizeMethod, "nearest");
+  assert.equal(elements.resizeMethod.value, "nearest");
+  api.state.exporting = true;
+  api.syncEditControls();
+  assert.equal(elements.resizeMethod.disabled, true);
+  elements.resizeMethod.value = "smooth";
+  api.updateResizeMethod();
+  assert.equal(api.state.images[0].resizeMethod, "nearest", "a pending export keeps its method");
+});
+
+test("size inputs, size presets and rotation retain the resize method while a full reset clears it", () => {
+  const { api, elements } = loadActionApi();
+  const item = stateRecord("pixel-art", 100, 80, { resizeMethod: "nearest" });
+  api.state.images = [item]; api.state.selectedId = item.id;
+  elements.resizeWidth.value = "200"; elements.resizeHeight.value = "160";
+  api.updateResizeFromNumbers("width");
+  assert.equal(item.resizeMethod, "nearest");
+  api.setSelectedResize(512, 512, false);
+  assert.equal(item.resizeMethod, "nearest");
+  api.setSelectedResize(null, null, true);
+  assert.equal(item.resizeMethod, "nearest");
+  api.rotateSelected(90);
+  assert.equal(item.resizeMethod, "nearest");
+  const snapshot = api.snapshotRecord(item);
+  api.resetRecord(item);
+  assert.equal(item.resizeMethod, "smooth");
+  assert.equal(snapshot.resizeMethod, "nearest");
+});
+
+for (const marked of [false, true]) {
+  test(`${marked ? "marked" : "all-image"} resize copies the method and dimensions as one undoable change`, () => {
+    const { api } = loadActionApi();
+    const source = stateRecord("source", 100, 80, { resizeMethod: "nearest", resize: { width: 50, height: 40, keepAspect: true }, filter: api.createDefaultFilterState(), finishLayers: [] });
+    const target = stateRecord("target", 200, 160, { resizeMethod: "smooth", transparency: { opacity: 70 }, finishLayers: [] });
+    const other = stateRecord("other", 300, 240, { resizeMethod: "smooth", finishLayers: [] });
+    api.state.images = [source, target, other]; api.state.selectedId = source.id; api.state.mode = "edit";
+    api.state.markedImageIds.add(target.id);
+    const sourceBefore = plain(source), otherBefore = plain(other);
+    forgetImageHistory(api);
+    if (marked) assert.equal(api.applyMarkedBatch("resize"), true);
+    else api.applySelectedResizeToAll();
+    assert.equal(target.resizeMethod, "nearest");
+    assert.deepEqual(plain(target.resize), { width: 50, height: 40, keepAspect: false });
+    assert.equal(target.transparency.opacity, 70);
+    if (marked) {
+      assert.deepEqual(plain(source), sourceBefore);
+      assert.deepEqual(plain(other), otherBefore);
+    } else assert.equal(other.resizeMethod, "nearest");
+    assert.equal(api.state.imageHistory.past.length, 1);
+    assert.equal(api.travelImageHistory("undo"), true);
+    assert.equal(api.state.images[1].resizeMethod, "smooth");
+    assert.equal(api.state.images[1].resize.width, null);
+    assert.equal(api.travelImageHistory("redo"), true);
+    assert.equal(api.state.images[1].resizeMethod, "nearest");
+    assert.equal(api.state.images[1].resize.width, 50);
+  });
+}
+
+test("edit presets persist the resize method and older or invalid presets restore smoothing", () => {
+  const storage = createStorageHarness();
+  const { api, elements } = loadActionApi({ localStorage: storage });
+  const item = stateRecord("preset-pixels", 20, 10, { resizeMethod: "nearest" });
+  api.state.mode = "edit"; api.state.images = [item]; api.state.selectedId = item.id;
+  elements.processingPresetName.value = "pixel art";
+  assert.equal(api.saveCurrentProcessingPreset(), true);
+  const loaded = api.loadProcessingPresets(storage);
+  assert.equal(loaded[0].settings.resizeMethod, "nearest");
+  api.resetRecord(item);
+  assert.equal(api.applyProcessingPresetSettings("edit", loaded[0].settings), true);
+  assert.equal(item.resizeMethod, "nearest");
+  for (const value of [undefined, "invalid"]) {
+    const settings = { ...plain(loaded[0].settings), resizeMethod: value };
+    assert.equal(api.applyProcessingPresetSettings("edit", settings), true);
+    assert.equal(item.resizeMethod, "smooth");
+  }
+});
+
+test("project JSON roundtrip preserves per-image resize methods and defaults older projects to smoothing", async () => {
+  const { api } = loadActionApi();
+  const file = new File([new Uint8Array([1, 2, 3])], "pixels.png", { type: "image/png" });
+  api.state.images = [
+    stateRecord("nearest", 20, 10, { file, resizeMethod: "nearest", finishLayers: [] }),
+    stateRecord("smooth", 20, 10, { file, resizeMethod: "smooth", finishLayers: [] }),
+  ];
+  api.state.selectedId = "nearest";
+  const saved = api.validateProjectDocument(plain(await api.createProjectDocument()));
+  assert.deepEqual(saved.images.map(record => record.resizeMethod), ["nearest", "smooth"]);
+  const sources = new Map(saved.assets.map(asset => [asset.id, { file, objectUrl: `blob:${asset.id}`, naturalWidth: 20, naturalHeight: 10, image: {} }]));
+  assert.deepEqual(Array.from(api.unpackProject(saved, sources).images, record => record.resizeMethod), ["nearest", "smooth"]);
+  delete saved.images[0].resizeMethod;
+  saved.images[1].resizeMethod = "invalid";
+  assert.deepEqual(Array.from(api.unpackProject(saved, sources).images, record => record.resizeMethod), ["smooth", "smooth"]);
+});
+
+test("resized drawing and the neutral fast path apply nearest sampling without leaking canvas state", () => {
+  const { api } = loadActionApi();
+  for (const resized of [false, true]) {
+    const context = createSmoothingContext();
+    const item = stateRecord("pixels", 20, 10, {
+      image: {}, resizeMethod: "nearest",
+      resize: { width: resized ? 40 : null, height: resized ? 20 : null, keepAspect: true },
+    });
+    api.drawProcessedRecordInto(context, item, 0, 0, 40, 20);
+    assert.equal(context.draws.at(-1).smoothing, false);
+    assert.equal(context.imageSmoothingEnabled, true);
+    assert.equal(context.imageSmoothingQuality, "low");
+    delete item.resizeMethod;
+    api.drawProcessedRecordInto(context, item, 0, 0, 40, 20);
+    assert.equal(context.draws.at(-1).smoothing, true, "legacy images retain existing smoothing");
+    assert.equal(context.imageSmoothingEnabled, true);
+    assert.equal(context.imageSmoothingQuality, "low");
+  }
+});
+
+test("transparent tiled drawing keeps nearest sampling in both source and composite passes", () => {
+  for (const method of ["nearest", "smooth"]) for (const resized of [false, true]) {
+    const tiles = [];
+    const { api } = loadActionApi({ createElement(tagName) {
+      if (tagName !== "canvas") return new FakeElement();
+      const canvas = new FakeElement();
+      canvas.context = createSmoothingContext(canvas); tiles.push(canvas);
+      return canvas;
+    } });
+    const item = stateRecord("keyed-pixels", 1025, 2, {
+      image: {}, resizeMethod: method,
+      resize: { width: resized ? 2050 : null, height: resized ? 4 : null, keepAspect: true },
+      transparency: { enabled: true, color: "#ffffff", tolerance: 0, opacity: 100 },
+    });
+    const context = createSmoothingContext();
+    api.drawProcessedRecordInto(context, item, 0, 0, resized ? 2050 : 1025, resized ? 4 : 2);
+    const sourceDraws = tiles.flatMap(tile => tile.context.draws);
+    assert.ok(sourceDraws.length >= 3, "the test crosses multiple 512px tiles");
+    assert.ok(sourceDraws.every(draw => draw.smoothing === (method === "smooth")));
+    assert.ok(context.draws.every(draw => draw.smoothing === (method === "smooth")));
+    assert.equal(context.imageSmoothingEnabled, true);
+    assert.equal(context.imageSmoothingQuality, "low");
+    assert.ok(tiles.every(tile => tile.width === 1 && tile.height === 1));
+  }
+});
+
+test("the resize method select has a label, both choices and explanatory help", () => {
+  const html = readFileSync(INDEX_PATH, "utf8");
+  assert.match(html, /<label\b[^>]*for="resizeMethod"[^>]*>/);
+  const select = html.match(/<select\b[^>]*id="resizeMethod"[^>]*>[\s\S]*?<\/select>/)?.[0];
+  assert.ok(select);
+  assert.match(select, /value="smooth"/);
+  assert.match(select, /value="nearest"/);
+  assert.match(select, /ニアレストネイバー|最近傍/);
+  assert.match(select, /aria-describedby="[^"]+"/);
 });

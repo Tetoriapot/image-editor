@@ -1430,6 +1430,7 @@ a:focus-visible {
 }
 
 .settings-section > .field + .field,
+.preset-grid + .field,
 .field + .input-grid,
 .input-grid + .field,
 .field + .checkbox-row,
