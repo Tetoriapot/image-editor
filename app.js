@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const SUPPORTED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+  const SUPPORTED_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
   const FORMAT_MIME = {
     png: "image/png",
     jpeg: "image/jpeg",
@@ -1105,7 +1105,7 @@
     const validFiles = allFiles.filter(isSupportedImageFile);
     const rejectedCount = allFiles.length - validFiles.length;
     if (!validFiles.length) {
-      if (allFiles.length) setStatus("PNG・JPEG・WebP画像を選択してください。", "error");
+      if (allFiles.length) setStatus("PNG・JPEG・WebP・GIF画像を選択してください。", "error");
       showImportProblems(allFiles);
       return;
     }
@@ -1134,7 +1134,7 @@
     const type = String(file?.type || "").toLowerCase();
     if (SUPPORTED_TYPES.has(type) || type === "image/jpg") return true;
     return !type || type === "application/octet-stream"
-      ? /\.(?:png|jpe?g|webp)$/i.test(String(file?.name || ""))
+      ? /\.(?:png|jpe?g|webp|gif)$/i.test(String(file?.name || ""))
       : false;
   }
 
@@ -1145,7 +1145,7 @@
       .concat(failed.map((file) => ({ file, failed: true })));
     issues.forEach(({ file, failed }) => {
       const row = document.createElement("li");
-      row.textContent = `${file.name}：${failed ? "画像を読み取れませんでした。元ファイルを確認し、PNG・JPEG・WebPで書き出し直してください。" : "未対応の形式です。写真アプリなどでPNG・JPEG・WebPへ変換してから追加してください。"}`;
+      row.textContent = `${file.name}：${failed ? "画像を読み取れませんでした。元ファイルを確認し、PNG・JPEG・WebP・GIFで書き出し直してください。" : "未対応の形式です。写真アプリなどでPNG・JPEG・WebP・GIFへ変換してから追加してください。"}`;
       el.importReportList.append(row);
     });
     setElementHidden(el.importReport, issues.length === 0);
@@ -1236,7 +1236,7 @@
     const validFiles = allFiles.filter(isSupportedImageFile);
     const rejectedCount = allFiles.length - validFiles.length;
     if (!validFiles.length) {
-      if (allFiles.length) setStatus("PNG・JPEG・WebP素材を選択してください。", "error");
+      if (allFiles.length) setStatus("PNG・JPEG・WebP・GIF素材を選択してください。", "error");
       showImportProblems(allFiles);
       return;
     }
@@ -1463,7 +1463,7 @@
     const validFiles = allFiles.filter(isSupportedImageFile);
     const rejectedCount = allFiles.length - validFiles.length;
     if (!validFiles.length) {
-      if (allFiles.length) setStatus("仕上げ素材にはPNG・JPEG・WebPを選択してください。", "error");
+      if (allFiles.length) setStatus("仕上げ素材にはPNG・JPEG・WebP・GIFを選択してください。", "error");
       showImportProblems(allFiles);
       return [];
     }
@@ -7408,8 +7408,9 @@
       const buffer = new Uint8Array(await file.arrayBuffer());
       let binary = "";
       for (let start = 0; start < buffer.length; start += 32768) binary += String.fromCharCode(...buffer.subarray(start, start + 32768));
-      const type = file.type === "image/jpg" ? "image/jpeg" : file.type;
-      const guessed = /\.webp$/i.test(file.name) ? "image/webp" : /\.jpe?g$/i.test(file.name) ? "image/jpeg" : "image/png";
+      const rawType = String(file.type || "").toLowerCase();
+      const type = rawType === "image/jpg" ? "image/jpeg" : rawType;
+      const guessed = /\.gif$/i.test(file.name) ? "image/gif" : /\.webp$/i.test(file.name) ? "image/webp" : /\.jpe?g$/i.test(file.name) ? "image/jpeg" : "image/png";
       assets.push({ id, name: String(file.name || source.name || "image.png"), type: SUPPORTED_TYPES.has(type) ? type : guessed, data: btoa(binary) });
       sources.set(source.objectUrl, id);
       return id;

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="画像を外部へ送信せず、ブラウザだけで結合・分割・切り抜き・リサイズ・自由配置・フィルターによる画像加工ができるツールです。">
   <title>画像かんたん加工</title>
-  <link rel="stylesheet" href="style.css?v=20261108-1">
-  <script src="app.js?v=20261108-1" defer></script>
+  <link rel="stylesheet" href="style.css?v=20261123-1">
+  <script src="app.js?v=20261123-1" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#mainContent">メインコンテンツへ移動</a>
@@ -134,7 +134,7 @@
             id="fileInput"
             class="visually-hidden"
             type="file"
-            accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+            accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
             multiple
             aria-label="加工する画像を選択"
           >
@@ -179,7 +179,7 @@
             id="canvasFileInput"
             class="visually-hidden"
             type="file"
-            accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+            accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
             multiple
             aria-label="キャンバスへ配置する画像を選択"
           >
@@ -217,7 +217,8 @@
                 <span></span>
               </div>
               <h3>画像をここにドロップ</h3>
-              <p>PNG・JPEG・WebP（複数選択できます）</p>
+              <p>PNG・JPEG・WebP・GIF（複数選択できます）</p>
+              <p>GIFは先頭の1コマを静止画として読み込みます。</p>
               <span class="button button-primary drop-zone-button" aria-hidden="true">画像を選択</span>
             </div>
           </div>
@@ -744,7 +745,7 @@
               id="filterFinishInput"
               class="visually-hidden"
               type="file"
-              accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+              accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
               multiple
               aria-label="仕上げに使う画像素材を選択"
               disabled
@@ -935,7 +936,7 @@
                 <input id="canvasBackgroundColor" type="color" value="#ffffff" aria-label="キャンバスのカスタム背景色">
               </div>
             </div>
-            <input id="canvasBackgroundInput" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" aria-label="背景にする画像を選択">
+            <input id="canvasBackgroundInput" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" aria-label="背景にする画像を選択">
             <button id="canvasBackgroundBtn" class="button button-quiet button-full canvas-background-button" type="button">背景画像を追加</button>
           </section>
 
@@ -1063,6 +1064,7 @@
             <p id="qualityHelp" class="field-help">JPEG・WebPで使用します</p>
           </div>
           <p id="transparencyFormatHint" class="field-help output-format-hint is-hidden" role="status" hidden>透明部分を残す場合はPNGがおすすめです。JPEGでは透明部分が白になります。</p>
+          <p class="field-help">GIFは先頭の1コマを編集し、PNG・JPEG・WebPで保存します。</p>
         </section>
       </aside>
     </main>
@@ -1110,7 +1112,7 @@
           <div class="help-card-grid">
             <article class="help-card">
               <span class="help-card__number" aria-hidden="true">1</span>
-              <div><h3>画像を追加する</h3><p>左側の追加ボタン、ドラッグ＆ドロップ、またはファイル選択から画像を読み込みます。</p></div>
+              <div><h3>画像を追加する</h3><p>左側の追加ボタン、ドラッグ＆ドロップ、またはファイル選択からPNG・JPEG・WebP・GIF画像を読み込みます。GIFは先頭の1コマを静止画として編集し、PNG・JPEG・WebPで保存します。</p></div>
             </article>
             <article class="help-card">
               <span class="help-card__number" aria-hidden="true">2</span>
@@ -1167,7 +1169,16 @@
 
       <div class="app-dialog__body update-card-list">
         <article class="update-card">
-          <div class="update-card__meta"><time datetime="2026-11-08">2026.11.08</time><span>最新</span></div>
+          <div class="update-card__meta"><time datetime="2026-11-23">2026.11.23</time><span>最新</span></div>
+          <h3>GIF画像の読込に対応</h3>
+          <ul>
+            <li>GIFを通常の画像、合成レイヤー、背景、仕上げ素材として追加できます。</li>
+            <li>アニメーションGIFは先頭の1コマを編集し、PNG・JPEG・WebPで保存します。</li>
+            <li>作業ファイルには元のGIFと編集設定を保存し、開き直して編集を再開できます。</li>
+          </ul>
+        </article>
+        <article class="update-card">
+          <div class="update-card__meta"><time datetime="2026-11-08">2026.11.08</time></div>
           <h3>透過設定の一括適用を追加</h3>
           <ul>
             <li>選択中の画像の透過設定を、全画像またはチェックした画像へ適用できます。</li>

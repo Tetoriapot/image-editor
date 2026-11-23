@@ -1545,7 +1545,7 @@ test("finish multi-load preserves FileList and invocation order despite out-of-o
   const loading = api.addFinishFiles([
     imageFile("a.png"),
     imageFile("b.webp", "image/webp"),
-    imageFile("unsupported.gif", "image/gif"),
+    imageFile("unsupported.svg", "image/svg+xml"),
     imageFile("c.jpg", "image/jpeg"),
   ]);
   assert.equal(api.state.filter.queuedFinishLoadCount, 1);
@@ -6277,4 +6277,145 @@ test("product sources allow only the declared TeToriapot contact URL and no exte
     assert.doesNotMatch(source, /@import\s+(?:url\s*\()?\s*["']?https?:\/\//i, path.basename(file));
   }
   assert.deepEqual(remoteUrls, [{ file: "index.html", url: allowedContact }]);
+});
+
+test("GIF input recognizes MIME and extension fallbacks without accepting conflicting MIME types", () => {
+  const { api } = loadActionApi();
+  for (const [name, type] of [
+    ["素材.gif", "image/gif"],
+    ["素材", "IMAGE/GIF"],
+    ["日本語 素材.GIF", ""],
+    ["素材.Gif", "application/octet-stream"],
+    ["素材.png", "image/png"],
+    ["素材.jpg", "image/jpeg"],
+    ["素材.webp", "image/webp"],
+  ]) {
+    assert.equal(api.isSupportedImageFile(imageFile(name, type)), true, `${name}: ${type}`);
+  }
+  for (const [name, type] of [
+    ["素材.gif", "text/plain"],
+    ["素材.gif", "image/svg+xml"],
+    ["素材.gif.exe", ""],
+    ["素材.svg", "application/octet-stream"],
+    ["素材", ""],
+  ]) {
+    assert.equal(api.isSupportedImageFile(imageFile(name, type)), false, `${name}: ${type}`);
+  }
+});
+
+for (const target of ["images", "canvas", "finish"]) {
+  test(`${target} GIF loading retains successful files and reports malformed GIFs`, async () => {
+    const harness = createLoadHarness();
+    const { api, elements } = loadActionApi({ Image: harness.Image, URL: harness.URL });
+    const base = stateRecord("base", 100, 80, { finishLayers: [] });
+    if (target === "finish") {
+      api.state.images = [base];
+      api.state.selectedId = base.id;
+      api.state.mode = "filter";
+    }
+    const files = [
+      imageFile("日本語 素材.GIF", ""),
+      imageFile("broken.gif", "image/gif"),
+      imageFile("existing.png"),
+      imageFile("unsupported.svg", "image/svg+xml"),
+    ];
+    const loading = target === "images" ? api.addFiles(files)
+      : target === "canvas" ? api.addCanvasFiles(files)
+        : api.addFinishFiles(files);
+    await flushMicrotasks();
+    assert.equal(harness.instances.length, 3, "unsupported files must not enter the decoder");
+    harness.instances[2].succeed(40, 30);
+    harness.instances[1].fail();
+    harness.instances[0].succeed(32, 24);
+    await loading;
+
+    const records = target === "images" ? api.state.images
+      : target === "canvas" ? api.state.canvas.layers : base.finishLayers;
+    assert.deepEqual(Array.from(records, (item) => item.file.name), ["日本語 素材.GIF", "existing.png"]);
+    assert.equal(records[0].image, harness.instances[0]);
+    assert.deepEqual([
+      records[0].originalWidth || records[0].naturalWidth,
+      records[0].originalHeight || records[0].naturalHeight,
+    ], [32, 24]);
+    assert.deepEqual(harness.revoked, [harness.created[1].url]);
+    assert.equal(elements.importReport.hidden, false);
+    assert.match(elementText(elements.importReportList), /broken\.gif.*読み取れません/);
+    assert.match(elementText(elements.importReportList), /unsupported\.svg.*未対応/);
+    assert.match(elements.statusMessage.textContent, /2.*追加/);
+  });
+}
+
+test("GIF background loading uses the existing locked cover layer behavior", async () => {
+  const harness = createLoadHarness();
+  const { api } = loadActionApi({ Image: harness.Image, URL: harness.URL });
+  const loading = api.addCanvasFiles([
+    imageFile("背景 GIF.gif", "image/gif"),
+    imageFile("ignored.gif", "image/gif"),
+  ], { x: 10, y: 10 }, { asBackground: true });
+  await flushMicrotasks();
+  assert.equal(harness.instances.length, 1);
+  harness.instances[0].succeed(400, 200);
+  await loading;
+  const background = api.state.canvas.layers[0];
+  assert.equal(background.name, "背景：背景 GIF.gif");
+  assert.equal(background.isBackground, true);
+  assert.equal(background.locked, true);
+  assert.equal(api.state.canvas.backgroundMode, "image");
+  assert.deepEqual(plain({ x: background.x, y: background.y, width: background.width, height: background.height }), {
+    x: -200, y: 0, width: 1600, height: 800,
+  });
+});
+
+test("GIF project roundtrip preserves source bytes and MIME for every supported MIME fallback", async () => {
+  const gifBytes = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
+  for (const type of ["image/gif", "", "application/octet-stream"]) {
+    const harness = createLoadHarness();
+    const { api } = loadActionApi({ Image: harness.Image, URL: harness.URL });
+    const file = new File([gifBytes], "日本語 素材.GIF", { type });
+    const common = { file, image: { naturalWidth: 40, naturalHeight: 30 }, objectUrl: "blob:shared-gif" };
+    const main = stateRecord("gif-main", 40, 30, {
+      ...common,
+      fileName: file.name,
+      crop: { x: 4, y: 2, width: 20, height: 20 },
+      finishLayers: [finishLayer("gif-finish", { ...common, name: file.name, placement: "behind", opacity: 0.6 })],
+    });
+    api.state.images = [main];
+    api.state.selectedId = main.id;
+    api.state.canvas.layers = [canvasLayer("gif-layer", { ...common, name: file.name, x: 42, rotation: 15 })];
+    const saved = await api.createProjectDocument();
+    assert.equal(saved.assets.length, 1, "shared GIF must be embedded once");
+    assert.equal(saved.assets[0].type, "image/gif", `input MIME: ${type}`);
+    assert.equal(saved.assets[0].name, file.name);
+    assert.equal(saved.assets[0].data, gifBytes.toString("base64"));
+    const project = api.validateProjectDocument(JSON.parse(JSON.stringify(saved)));
+    const decoding = api.decodeProjectAssets(project);
+    await flushMicrotasks();
+    assert.equal(harness.instances.length, 1);
+    harness.instances[0].succeed(40, 30);
+    const { sources } = await decoding;
+    const restored = api.unpackProject(project, sources);
+    assert.deepEqual(plain(restored.images[0].crop), { x: 4, y: 2, width: 20, height: 20 });
+    assert.equal(restored.images[0].finishLayers[0].placement, "behind");
+    assert.equal(restored.images[0].finishLayers[0].opacity, 0.6);
+    assert.equal(restored.canvas.layers[0].x, 42);
+    assert.equal(restored.canvas.layers[0].rotation, 15);
+    for (const material of [restored.images[0], restored.images[0].finishLayers[0], restored.canvas.layers[0]]) {
+      assert.equal(material.file.type, "image/gif");
+      assert.equal(material.file.name, file.name);
+      assert.deepEqual(Buffer.from(await material.file.arrayBuffer()), gifBytes);
+      assert.equal(material.image, harness.instances[0]);
+    }
+  }
+});
+
+test("all four image pickers accept GIF alongside existing image formats", () => {
+  const html = readFileSync(INDEX_PATH, "utf8");
+  for (const id of ["fileInput", "canvasFileInput", "filterFinishInput", "canvasBackgroundInput"]) {
+    const input = html.match(new RegExp(`<input\\b[^>]*\\bid="${id}"[^>]*>`, "i"))?.[0];
+    assert.ok(input, id);
+    const accept = input.match(/\baccept="([^"]*)"/i)?.[1].split(",");
+    for (const format of ["image/png", "image/jpeg", "image/webp", "image/gif", ".gif"]) {
+      assert.ok(accept?.includes(format), `${id} must accept ${format}`);
+    }
+  }
 });
